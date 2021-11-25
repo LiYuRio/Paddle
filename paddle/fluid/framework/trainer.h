@@ -307,6 +307,8 @@ class PipelineTrainer : public TrainerBase {
   void InitDumpEnv() override;
   virtual std::string GetDumpPath(int tid);
   void GetSkipVars(const ProgramDesc& main_program);
+  const std::vector<Scope*> GetMicrobatchScopes() const { return microbatch_scopes_; }
+  const platform::Place place() const { return place_; }
 
  protected:
   int num_microbatches_;

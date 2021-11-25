@@ -22,6 +22,8 @@
 namespace paddle {
 namespace framework {
 class ProgramDesc;
+class TrainerBase;
+class PipelineTrainer;
 }
 
 namespace distributed {
@@ -34,16 +36,17 @@ class FleetExecutor final {
   FleetExecutor() = delete;
   explicit FleetExecutor(const std::string& exe_desc_str);
   ~FleetExecutor();
-  void Init(const paddle::framework::ProgramDesc& program_desc);
+  void Init(const paddle::framework::ProgramDesc& program_desc, const std::shared_ptr<framework::TrainerBase>& trainer);
   void Run();
   void Release();
 
  private:
   DISABLE_COPY_AND_ASSIGN(FleetExecutor);
-  FleetExecutorDesc exe_desc_;
-  std::unique_ptr<RuntimeGraph> runtime_graph_;
   void InitMessageBus();
   void InitCarrier();
+  FleetExecutorDesc exe_desc_;
+  std::unique_ptr<RuntimeGraph> runtime_graph_;
+  std::shared_ptr<framework::PipelineTrainer> trainer_;
 };
 
 }  // namespace distributed

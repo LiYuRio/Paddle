@@ -24,8 +24,14 @@
 #include "paddle/fluid/platform/enforce.h"
 #include "paddle/fluid/platform/errors.h"
 #include "paddle/fluid/platform/macros.h"
+#include "paddle/fluid/platform/place.h"
 
 namespace paddle {
+
+namespace framework {
+class Scope;
+}
+
 namespace distributed {
 
 class TaskNode;
@@ -40,7 +46,8 @@ class Carrier final {
   }
 
   void Init(
-      const std::unordered_map<int64_t, TaskNode*>& interceptor_id_to_node);
+      const std::unordered_map<int64_t, TaskNode*>& interceptor_id_to_node, 
+      const std::vector<framework::Scope*>& microbatch_scopes, const platform::Place& place);
 
   ~Carrier() = default;
 
@@ -80,6 +87,8 @@ class Carrier final {
   std::vector<InterceptorMessage> message_tmp_{};
   bool creating_interceptors_{true};
   bool is_init_{false};
+  std::vector<framework::Scope*> microbatch_scopes_;
+  paddle::platform::Place place_;
 };
 
 }  // namespace distributed

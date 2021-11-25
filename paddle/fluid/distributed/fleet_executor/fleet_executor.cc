@@ -19,6 +19,7 @@
 #include "paddle/fluid/distributed/fleet_executor/task_node.h"
 #include "paddle/fluid/framework/operator.h"
 #include "paddle/fluid/framework/program_desc.h"
+#include "paddle/fluid/framework/trainer.h"
 
 namespace paddle {
 namespace distributed {
@@ -33,8 +34,10 @@ FleetExecutor::~FleetExecutor() {
   // Destroy Executor
 }
 
-void FleetExecutor::Init(const paddle::framework::ProgramDesc& program_desc) {
+void FleetExecutor::Init(const paddle::framework::ProgramDesc& program_desc, const std::shared_ptr<framework::TrainerBase>& trainer) {
   runtime_graph_ = std::make_unique<RuntimeGraph>(program_desc, exe_desc_);
+  trainer_ = std::dynamic_pointer_cast<framework::PipelineTrainer>(trainer);
+  PADDLE_ENFORCE_NOT_NULL(trainer_, platform::errors::PreconditionNotMet("Error occurs while casting TrainerBase to PipelineTrainer"));
   VLOG(5) << runtime_graph_->DebugString();
   InitCarrier();
   InitMessageBus();
@@ -43,7 +46,7 @@ void FleetExecutor::Init(const paddle::framework::ProgramDesc& program_desc) {
 void FleetExecutor::InitCarrier() {
   Carrier& carrier_instance = Carrier::Instance();
   if (!carrier_instance.IsInit()) {
-    carrier_instance.Init(runtime_graph_->intercepter_id_to_node());
+    carrier_instance.Init(runtime_graph_->intercepter_id_to_node(), trainer_->GetMicrobatchScopes(), trainer_->place());
   }
 }
 

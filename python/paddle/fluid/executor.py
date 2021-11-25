@@ -2011,7 +2011,7 @@ class Executor(object):
         num_of_gpu = fleet_exe_desc.dp_degree * fleet_exe_desc.mp_degree * fleet_exe_desc.pp_degree
         assert nrank == num_of_gpu, "The number of rank is not equal to the number of gpu."
         fleet_exe = core.FleetExecutor(fleet_exe_desc.SerializeToString())
-        fleet_exe.init(program._pipeline_opt["section_program"].desc)
+        fleet_exe.init(program._pipeline_opt["section_program"].desc, trainer_instance)
         fleet_exe.run()
         return None
 
