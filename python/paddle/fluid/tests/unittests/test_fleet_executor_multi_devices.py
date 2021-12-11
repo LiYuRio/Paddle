@@ -12,46 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
 import unittest
+from test_dist_base import TestDistBase
+
 import os
 import paddle
 import paddle.fluid as fluid
-import paddle.distributed.fleet as fleet
 
 paddle.enable_static()
+flag_name = os.path.splitext(__file__)[0]
 
 
-class TestFleetExecutor(unittest.TestCase):
-    def run_fleet_executor(self, place, fleet_opt=dict()):
-        exe = paddle.static.Executor(place)
-        empty_program = paddle.static.Program()
-        with fluid.program_guard(empty_program, empty_program):
-            x = fluid.layers.data(name='x', shape=[1], dtype=paddle.float32)
-        empty_program._pipeline_opt = {
-            "fleet_opt": fleet_opt,
-            "section_program": empty_program
-        }
-        exe.run(empty_program, feed={'x': [1]})
+class TestFleetExecutor(TestDistBase):
+    def _setup_config(self):
+        self._sync_mode = True
+        self._use_reduce = False
+        self._use_reader_alloc = False
+        self._pipeline_mode = True
+        self._use_fleet_executor = True
+        self._nccl_comm_num = 1
 
-    def test_dist_executor_on_multi_devices(self):
-        os.environ["PADDLE_TRAINER_ID"] = "0"
-        os.environ[
-            "PADDLE_TRAINER_ENDPOINTS"] = "127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003,127.0.0.1:7004,127.0.0.1:7005,127.0.0.1:7006,127.0.0.1:7007"
-        strategy = fleet.DistributedStrategy()
-        strategy.sharding_configs = {
-            "dp_degree": 2,
-            "mp_degree": 2,
-            "pp_degree": 2
-        }
-        strategy.pipeline_configs = {"accumulate_steps": 8}
-        fleet_opt = {
-            "dist_strategy": strategy.sharding_configs,
-            "num_micro_batches": strategy.pipeline_configs["accumulate_steps"]
-        }
-        if fluid.is_compiled_with_cuda():
-            # TODO: Distribute test case is not supported for executor can not stop
-            pass
+    def need_envs(self):
+        return {}
 
+    def test_dist_train_multi_device(self):
+        if fluid.core.is_compiled_with_cuda():
+            self.check_with_place(
+                "fleet_executor_mnist_multi_device.py",
+                check_error_log=True,
+                delta=1e0,
+                log_name=flag_name,
+                need_envs=self.need_envs())
 
 if __name__ == "__main__":
     unittest.main()

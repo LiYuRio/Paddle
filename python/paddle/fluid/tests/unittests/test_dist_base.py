@@ -150,6 +150,15 @@ class TestDistRunnerBase(object):
         out_losses = []
 
         main_program = fluid.default_main_program()
+        if args.use_fleet_executor:
+            fleet_opt = {
+               "dist_strategy": dist_strategy.sharding_configs,
+               "num_micro_batches": dist_strategy.pipeline_configs["accumulate_steps"]
+            }
+            main_program._pipeline_opt = {
+                "fleet_opt": fleet_opt,
+                "section_program": main_program 
+            }
         lr_sheduler = self.get_lr_scheduler(main_program)
         for i in six.moves.xrange(RUN_STEP):
             loss = exe.run(main_program, fetch_list=[avg_cost])
@@ -718,6 +727,7 @@ def runtime_main(test_class):
     parser.add_argument('--enable_backward_deps', action='store_true')
     parser.add_argument('--use_hallreduce', action='store_true')
     parser.add_argument('--use_pipeline', action='store_true')
+    parser.add_argument('--use_fleet_executor', action='store_true')
     parser.add_argument('--use_fleet_api', action='store_true')
     parser.add_argument('--use_fleet_api_20', action='store_true')
     parser.add_argument('--use_local_sgd', action='store_true')
@@ -830,6 +840,7 @@ class TestDistBase(unittest.TestCase):
         self._gloo_mode = False  # now, support gloo backend
         self._hccl_mode = False
         self._pipeline_mode = False
+        self._use_fleet_executor = False
         self._mp_mode = False
         self._diff_batch = False
         # FIXME(typhoonzero): I added this stupid argument to enable
@@ -1244,6 +1255,8 @@ class TestDistBase(unittest.TestCase):
 
         if self._pipeline_mode:
             tr_cmd += " --use_pipeline"
+        if self._use_fleet_executor:
+            tr_cmd += " --use_fleet_executor"
         if self._mp_mode:
             env = {"FLAGS_selected_gpus": "{}".format(trainer_id)}
 
@@ -1381,7 +1394,7 @@ class TestDistBase(unittest.TestCase):
             print("outs[1]:", outs[1])
 
         return pickle.loads(outs[0]), pickle.loads(outs[1])
-
+    
     def _run_pipeline(self, model, envs, check_error_log, log_name):
         # NOTE: we reuse ps_endpoints as nccl2 worker endpoints
         worker_endpoints = self._ps_endpoints.split(",")
