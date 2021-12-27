@@ -32,6 +32,7 @@ limitations under the License. */
 #include "paddle/fluid/framework/data_layout.h"
 #include "paddle/fluid/framework/data_type_transform.h"
 #include "paddle/fluid/framework/executor.h"
+#include "paddle/fluid/framework/event_based_executor.h"
 #include "paddle/fluid/framework/executor_cache.h"
 #include "paddle/fluid/framework/executor_gc_helper.h"
 #include "paddle/fluid/framework/feed_fetch_method.h"
@@ -2145,6 +2146,11 @@ All parameter, weight, gradient are variables in Paddle.
       .def("ResetDataset", &TrainerBase::ResetDataset);
 
   m.def("_get_eager_deletion_vars", &framework::GetEagerDeletionCleanVars);
+
+	py::class_<framework::EventBasedExecutor>(m, "EventBasedExecutor")
+			.def(py::init<>())
+			.def("compile", &EventBasedExecutor::Compile)
+			.def("run", &EventBasedExecutor::Run);
 
   py::class_<framework::Executor>(m, "Executor")
       .def(py::init<const platform::Place &>())

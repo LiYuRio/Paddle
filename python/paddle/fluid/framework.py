@@ -3544,6 +3544,12 @@ class Block(object):
         elif var.type == core.VarDesc.VarType.RAW:
             ret_var = self.create_var(
                 name=var.name, persistable=var.persistable, type=var.type)
+        elif var.type == core.VarDesc.VarType.FEED_MINIBATCH:
+            ret_var = self.create_var(
+                name=var.name, persistable=var.persistable, type=var.type)
+        elif var.type == core.VarDesc.VarType.FETCH_LIST:
+            ret_var = self.create_var(
+                name=var.name, persistable=var.persistable, type=var.type)
         elif var.type == core.VarDesc.VarType.SELECTED_ROWS:
             ret_var = self.create_var(
                 name=var.name,
@@ -4528,6 +4534,9 @@ class Program(object):
         self._graph = None
         # to tag whether is startup_program
         self._is_start_up_program_ = False
+
+        # assigned if this program executed by event based executor
+        self._event_based_exe_opt = None
 
     def _find_var_class_kwargs(self, new_desc):
         # NOTE: not all variables support shape/dtype/lod_level methods.
