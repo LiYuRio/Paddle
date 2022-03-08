@@ -83,6 +83,21 @@ class Interceptor {
   DISABLE_COPY_AND_ASSIGN(Interceptor);
 
  protected:
+  virtual void SendDataReadyToDownStream();
+  virtual void ReplyCompletedToUpStream();
+  void IncreaseReady(int64_t up_id);
+  void DecreaseBuff(int64_t down_id);
+  bool IsInputReady();
+  bool CanWriteOutput();
+  bool is_source_{false};
+  bool is_last_{false};
+
+  // upstream_id-->(max_ready_size, ready_size)
+  std::map<int64_t, std::pair<int64_t, int64_t>> in_readys_{};
+  // downstream_id-->(max_buffer_size, used_size)
+  std::map<int64_t, std::pair<int64_t, int64_t>> out_buffs_{};
+  int64_t step_{0};
+
   // interceptor id, handed from above layer
   int64_t interceptor_id_;
 

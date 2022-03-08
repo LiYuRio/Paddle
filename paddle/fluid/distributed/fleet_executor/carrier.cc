@@ -30,6 +30,7 @@ namespace distributed {
 
 USE_INTERCEPTOR(Compute);
 USE_INTERCEPTOR(Amplifier);
+USE_INTERCEPTOR(While);
 
 void Carrier::Init(
     int64_t rank,
