@@ -30,6 +30,7 @@ limitations under the License. */
 #include "paddle/fluid/platform/device/gpu/gpu_device_function.h"
 #include "paddle/fluid/platform/device/gpu/gpu_dnn.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
+#include "paddle/fluid/operators/matmul_v2_op.h"
 
 #if defined(PADDLE_WITH_NCCL) || defined(PADDLE_WITH_RCCL)
 #include "paddle/fluid/platform/collective_helper.h"
@@ -78,6 +79,7 @@ using float16 = plat::float16;
 template <typename T>
 struct Masked_multihead_attention_params {
   // output buffer, [B, 1(seq_len), num_head * dim_head]
+
   T *out;
   // qkv_out, [B, 1(seq_len), 3, num_head * dim_head]
   const T *qkv;
@@ -174,6 +176,21 @@ inline __device__ uint32_t float2_to_half2(float2 f) {
   asm volatile("cvt.rn.f16.f32 %0, %1;\n" : "=h"(tmp.u16[1]) : "f"(f.y));
 #endif
   return tmp.u32;
+}
+
+inline __device__ uint16_t float_to_half(float f)
+{
+    union {
+        uint32_t u32;
+        uint16_t u16[2];
+    } tmp;
+#if 0 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800  // Is it better?
+  float zero = 0.f;
+  asm volatile("cvt.rn.f16x2.f32 %0, %1, %2;\n" : "=r"(tmp.u32) : "f"(zero), "f"(f));
+#else
+    asm volatile("cvt.rn.f16.f32 %0, %1;\n" : "=h"(tmp.u16[0]) : "f"(f));
+#endif
+    return tmp.u16[0];
 }
 
 inline __device__ float add(float a, float b) { return a + b; }
@@ -444,12 +461,80 @@ inline __device__ Float8_ cast_to_float(uint4 u) {
   return tmp;
 }
 
+inline __device__ void convert_from_float(float &dst, float src) {  // NOLINT
+  dst = src;
+}
+
+inline __device__ void convert_from_float(float4 &dst, float4 src) {  // NOLINT
+  dst = src;
+}
+
+inline __device__ void convert_from_float(plat::float16 &dst,  // NOLINT
+                                          float src) {
+  dst = static_cast<plat::float16>(src);
+}
+
+inline __device__ void convert_from_float(uint4 &dst, Float8_ src) {  // NOLINT
+  dst.x = float2_to_half2(src.x);
+  dst.y = float2_to_half2(src.y);
+  dst.z = float2_to_half2(src.z);
+  dst.w = float2_to_half2(src.w);
+}
+
+template <>
+inline __device__ uint32_t mul(uint32_t a, float b) {
+  float2 tmp = half2_to_float2(a);
+  float2 tmp_res;
+  tmp_res.x = tmp.x * b;
+  tmp_res.y = tmp.y * b;
+  uint32_t res = float2_to_half2(tmp_res);
+  return res;
+}
+
+template <>
+inline __device__ uint2 mul(uint2 a, float b) {
+  uint2 res;
+  res.x = mul<uint32_t>(a.x, b);
+  res.y = mul<uint32_t>(a.y, b);
+  return res;
+}
+
+template <>
+inline __device__ uint4 mul(uint4 a, float b) {
+  uint4 res;
+  res.x = mul<uint32_t>(a.x, b);
+  res.y = mul<uint32_t>(a.y, b);
+  res.z = mul<uint32_t>(a.z, b);
+  res.w = mul<uint32_t>(a.w, b);
+  return res;
+}
+
+template <>
+inline __device__ float2 mul(float2 a, float b) {
+  float2 res;
+  res.x = a.x * b;
+  res.y = a.y * b;
+  return res;
+}
+
+template <>
+inline __device__ float4 mul(float4 a, float b) {
+  float4 res;
+  res.x = a.x * b;
+  res.y = a.y * b;
+  res.z = a.z * b;
+  res.w = a.w * b;
+  return res;
+}
+
 template <int THREADS_PER_KEY, typename K_vec, int N>
-inline __device__ float qk_dot_(const K_vec (&q)[N], const K_vec (&k)[N]) {
-  K_vec qk_vec = mul<K_vec, K_vec, K_vec>(q[0], k[0]);
+inline __device__ float qk_dot_(const K_vec (&q)[N], const K_vec (&k)[N], float inv) {
+  K_vec inv_q = mul<K_vec, K_vec, float>(q[0], inv);
+  K_vec qk_vec = mul<K_vec, K_vec, K_vec>(inv_q, k[0]);
 #pragma unroll
   for (int ii = 1; ii < N; ++ii) {
-    qk_vec = fma(q[ii], k[ii], qk_vec);
+    inv_q = mul<K_vec, K_vec, float>(q[ii], inv);
+    qk_vec = fma(inv_q, k[ii], qk_vec);
   }
 
   float qk = sum(qk_vec);
@@ -463,8 +548,8 @@ inline __device__ float qk_dot_(const K_vec (&q)[N], const K_vec (&k)[N]) {
 template <typename T, int THREADS_PER_KEY>
 struct Qk_dot {
   template <typename K_vec, int N>
-  static inline __device__ float dot(const K_vec (&q)[N], const K_vec (&k)[N]) {
-    return qk_dot_<THREADS_PER_KEY>(q, k);
+  static inline __device__ float dot(const K_vec (&q)[N], const K_vec (&k)[N], float inv) {
+    return qk_dot_<THREADS_PER_KEY>(q, k, inv);
   }
 };
 
@@ -493,26 +578,6 @@ inline __device__ float block_sum(float *red_smem, float sum) {
   }
 
   return __shfl_sync(uint32_t(-1), sum, 0);
-}
-
-inline __device__ void convert_from_float(float &dst, float src) {  // NOLINT
-  dst = src;
-}
-
-inline __device__ void convert_from_float(float4 &dst, float4 src) {  // NOLINT
-  dst = src;
-}
-
-inline __device__ void convert_from_float(plat::float16 &dst,  // NOLINT
-                                          float src) {
-  dst = static_cast<plat::float16>(src);
-}
-
-inline __device__ void convert_from_float(uint4 &dst, Float8_ src) {  // NOLINT
-  dst.x = float2_to_half2(src.x);
-  dst.y = float2_to_half2(src.y);
-  dst.z = float2_to_half2(src.z);
-  dst.w = float2_to_half2(src.w);
 }
 
 inline __device__ void zero(uint16_t &dst) { dst = uint16_t(0); }  // NOLINT
@@ -617,6 +682,7 @@ __global__ void masked_multihead_attention_kernel(
             : k_bias;
 
     q = add(q, q_bias);
+
     // TODO(wangxi): See this https://github.com/microsoft/unilm/issues/510
     //   we may not require k_bias.
     k = add(k, k_bias);
@@ -706,7 +772,9 @@ __global__ void masked_multihead_attention_kernel(
       }
     }
 
-    float qk = Qk_dot<T, THREADS_PER_KEY>::dot(q, k) * params.inv_sqrt_dh;
+    float qk = Qk_dot<T, THREADS_PER_KEY>::dot(q, k, params.inv_sqrt_dh);
+    //float qk = Qk_dot<T, THREADS_PER_KEY>::dot(q, k) * params.inv_sqrt_dh;
+    printf("qk: %f\n", qk);
 
     // bool is_mask = false;
     if (ti < params.timestep && tid % THREADS_PER_KEY == 0) {
@@ -751,10 +819,23 @@ __global__ void masked_multihead_attention_kernel(
 #endif
 
   float sum = 0.f;
+  //printf("qk_max out: %f\n", qk_max);
   for (int ti = tid; ti <= params.timestep; ti += THREADS_PER_BLOCK) {
     // bool is_mask = false;
     // float logit = is_mask ? 0.f : __expf(qk_smem[ti] - qk_max);
+    //if (isnan(qk_max)) {
+    //  printf("qk_max out: %f\n", qk_max);
+    //}
+    //printf("qk_smem out %d: %f\n", ti, qk_smem[ti]);
     float logit = __expf(qk_smem[ti] - qk_max);
+    //if (isnan(logit)) {
+    //  printf("qk_smem%d: %f\n", ti, qk_smem[ti]);
+    //  printf("qk_max: %f\n", qk_max);
+    //  printf("logit: %f\n", logit);
+    //}
+    //if (isnan(qk_smem[ti])) {
+    //  printf("qk_smem%d: %f\n", ti, qk_smem[ti]);
+    //}
     sum += logit;
     qk_smem[ti] = logit;
   }
@@ -764,6 +845,12 @@ __global__ void masked_multihead_attention_kernel(
   // FIXME(wangxi): need add 1.e-6f?
   float inv_sum = __fdividef(1.f, sum + 1.e-6f);
   for (int ti = tid; ti <= params.timestep; ti += THREADS_PER_BLOCK) {
+    //if (isnan(qk_smem[ti])) {
+    //  printf("qk_smem%d: %f\n", ti, qk_smem[ti]);
+    //}
+    //if (isnan(inv_sum)) {
+    //  printf("inv_sum: %f\n", inv_sum);
+    //}
     convert_from_float(logits_smem[ti], qk_smem[ti] * inv_sum);
   }
   __syncthreads();
@@ -793,6 +880,9 @@ __global__ void masked_multihead_attention_kernel(
       V_vec v = *reinterpret_cast<const V_vec *>(&v_cache[ti * Dh]);
 #if defined(MMHA_USE_FP32_ACUM_FOR_LOGITS)
       float logit = logits_smem[ti];
+      //if (isnan(logit)) {
+      //  printf("logit %d: %f\n", ti, logit);
+      //}
       out = fma(logit, cast_to_float(v), out);
 #else
       T logit = logits_smem[ti];
@@ -811,48 +901,49 @@ __global__ void masked_multihead_attention_kernel(
   __syncthreads();
 #endif
 
-  V_vec v_bias;
-  zero(v_bias);
-  if (vo == (params.timestep % V_PER_ITER) && (Dh == Dh_MAX || vi < Dh)) {
-    V_vec v = *reinterpret_cast<const V_vec *>(
-        &params.qkv[2 * params.num_head * Dh + qkv_base_offset + vi]);
-    v_bias = *reinterpret_cast<const V_vec *>(
-        &params.qkv_bias[2 * params.num_head * Dh + hi * Dh + vi]);
-    v = add(v, v_bias);
-    *reinterpret_cast<V_vec *>(&v_cache[params.timestep * Dh]) = v;
 
-#if defined(MMHA_USE_FP32_ACUM_FOR_LOGITS)
-    out = fma(logits_smem[params.timestep], cast_to_float(v), out);
-#else
-    out = fma(logits_smem[params.timestep], v, out);
-#endif
-  }
-
-  __syncthreads();
-
-  if (Dh == Dh_MAX || vi < Dh) {
-#pragma unroll
-    for (int active_groups = V_PER_ITER; active_groups >= 2;
-         active_groups /= 2) {
-      int midpoint = active_groups / 2;
-
-      if (vo >= midpoint && vo < active_groups && (Dh == Dh_MAX || vi < Dh)) {
-#ifdef MMHA_USE_FP32_ACUM_FOR_OUT
-        convert_from_float(
-            *reinterpret_cast<V_vec *>(&out_smem[(vo - midpoint) * Dh + vi]),
-            out);
-#else
-        *reinterpret_cast<V_vec *>(&out_smem[(vo - midpoint) * Dh + vi]) = out;
-#endif
-      }
-      __syncthreads();
-      if (vo < midpoint && (Dh == Dh_MAX || vi < Dh)) {
-        out =
-            add(*reinterpret_cast<const V_vec *>(&out_smem[vo * Dh + vi]), out);
-      }
-      __syncthreads();
-    }
-  }
+//  V_vec v_bias;
+//  zero(v_bias);
+//  if (vo == (params.timestep % V_PER_ITER) && (Dh == Dh_MAX || vi < Dh)) {
+//    V_vec v = *reinterpret_cast<const V_vec *>(
+//        &params.qkv[2 * params.num_head * Dh + qkv_base_offset + vi]);
+//    v_bias = *reinterpret_cast<const V_vec *>(
+//        &params.qkv_bias[2 * params.num_head * Dh + hi * Dh + vi]);
+//    v = add(v, v_bias);
+//    *reinterpret_cast<V_vec *>(&v_cache[params.timestep * Dh]) = v;
+//
+//#if defined(MMHA_USE_FP32_ACUM_FOR_LOGITS)
+//    out = fma(logits_smem[params.timestep], cast_to_float(v), out);
+//#else
+//    out = fma(logits_smem[params.timestep], v, out);
+//#endif
+//  }
+//
+//  __syncthreads();
+//
+//  if (Dh == Dh_MAX || vi < Dh) {
+//#pragma unroll
+//    for (int active_groups = V_PER_ITER; active_groups >= 2;
+//         active_groups /= 2) {
+//      int midpoint = active_groups / 2;
+//
+//      if (vo >= midpoint && vo < active_groups && (Dh == Dh_MAX || vi < Dh)) {
+//#ifdef MMHA_USE_FP32_ACUM_FOR_OUT
+//        convert_from_float(
+//            *reinterpret_cast<V_vec *>(&out_smem[(vo - midpoint) * Dh + vi]),
+//            out);
+//#else
+//        *reinterpret_cast<V_vec *>(&out_smem[(vo - midpoint) * Dh + vi]) = out;
+//#endif
+//      }
+//      __syncthreads();
+//      if (vo < midpoint && (Dh == Dh_MAX || vi < Dh)) {
+//        out =
+//            add(*reinterpret_cast<const V_vec *>(&out_smem[vo * Dh + vi]), out);
+//      }
+//      __syncthreads();
+//    }
+//  }
 
   if (vo == 0 && (Dh == Dh_MAX || vi < Dh)) {
 #ifdef MMHA_USE_FP32_ACUM_FOR_OUT
@@ -1089,7 +1180,10 @@ void write_cache_kv(const platform::CUDADeviceContext &dev_ctx,
 template <typename T>
 class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
  public:
+  static int count() { static int i = 0; return ++i; }
   void Compute(const framework::ExecutionContext &ctx) const override {
+    int i = count();
+    printf("Fused Multi Transformer %d\n", i);
     using U = LayerNormParamType<T>;
     auto place = ctx.GetPlace();
     auto &dev_ctx = ctx.cuda_device_context();
@@ -1126,6 +1220,8 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
     int hidden_size = num_head * dim_head;
     int output_size = 3 * hidden_size;
     int input_size = dim_embed;
+    std::cout << output_size << " " << input_size << std::endl;
+    std::cout << "num_head: " << num_head << " dim_head: " << dim_head << std::endl;
 
     bool compute_bias = qkv_biases.size() > 0 && time_step == nullptr;
     // (transA, transB, compute_bias) = (false, trans_qkvw, false)
@@ -1297,6 +1393,8 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
       const Tensor *qkv_bias = qkv_biases.size() > 0 ? qkv_biases[i] : nullptr;
       // NOTE: in decoder stage, bias is fused in fmha
       const Tensor *bias = time_step ? nullptr : qkv_bias;
+     std::cout << qkv_weights[i]->dims() << std::endl;
+     std::cout << buf1->dims() << std::endl;
       qkv_compute.ComputeForward(
           qkv_weights[i], buf1, bias, &qkv_out, &qkv_out);
 #ifdef _DEBUG_FUSED_MULTI_TRANSFORMER
@@ -1310,6 +1408,7 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
       if (time_step) {  // generation decoder stage
         // [2, batch_size, num_head, max_seq_len, head_size]
         int max_seq_len = cache_kv->dims()[3];
+	//std::cout << "Layer " << i << " qkv_out: " << qkv_out << std::endl;
         fmha<T>(dev_ctx,
                 qkv_out,
                 *qkv_bias,
@@ -1381,13 +1480,23 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
       VLOG(0) << "step3";
 #endif
 
+      if (time_step) {
+        std::cout << "Layer " << i << " fmha_out: " << fmha_out << std::endl;
+        std::cout << "Shape of out linear weight: " << out_linear_weights[i]->dims() << std::endl;
+      }
       // step4. out_linear
       out_linear_compute.ComputeForward(
           out_linear_weights[i], &fmha_out, nullptr, buf1, nullptr);
+      //if (time_step) {
+      //	std::cout << "Layer " << i << " buf1: " << *buf1 << std::endl;
+      //}
       AllReduce<T>(*buf1, ring_id, dev_ctx);
 #ifdef _DEBUG_FUSED_MULTI_TRANSFORMER
       VLOG(0) << "step4";
 #endif
+      //if (time_step) {
+      //	std::cout << "Layer " << i << " buf1: " << *buf1 << std::endl;
+      //}
 
       // step5. ln(residual + dropout(input + bias))
       if (pre_layer_norm) {
@@ -1413,6 +1522,9 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
 #ifdef _DEBUG_FUSED_MULTI_TRANSFORMER
       VLOG(0) << "step5";
 #endif
+      //if (time_step) {
+      //	std::cout << "Layer " << i << " buf1: " << *buf1 << std::endl;
+      //}
 
       // step6. ffn matmul1
       ffn1_linear_compute.ComputeForward(
@@ -1420,6 +1532,9 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
 #ifdef _DEBUG_FUSED_MULTI_TRANSFORMER
       VLOG(0) << "step6";
 #endif
+      //if (time_step) {
+      //	std::cout << "Layer " << i << " ffn1_out: " << ffn1_out << std::endl;
+      //}
 
       // step7. act bias
       // TODO(wangxi): remove dropout mask in inference
@@ -1478,6 +1593,7 @@ class FusedMultiTransformerOpKernel : public framework::OpKernel<T> {
       VLOG(0) << "step9";
 #endif
       x_data = buf1->data<T>();
+      //std::cout << "Layer " << i << " x_data: " << *buf1 << std::endl;
       std::swap(buf0, buf1);
     }
   }

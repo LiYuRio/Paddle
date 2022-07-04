@@ -241,6 +241,7 @@ class FusedAttentionOpKernel : public framework::OpKernel<T> {
     // fmha_out: [batch_size, seq_len, num_head, head_dim]
     // weight:   [embed_dim, embed_dim]
     // out_linear_out: [batch_size, seq_len, embed_dim]
+    std::cout << "fmha out: " << *fmha_out << std::endl;
     out_linear_compute.ComputeForward(out_linear_weight, fmha_out, nullptr,
                                       out_linear_out, nullptr);
     // tensor model parallel
