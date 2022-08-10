@@ -717,7 +717,11 @@ def broadcast(tensor, src, group=None, use_calc_stream=True):
                      })
 
 
-def all_reduce(tensor, op=ReduceOp.SUM, group=None, use_calc_stream=True):
+def all_reduce(tensor,
+               op=ReduceOp.SUM,
+               group=None,
+               async_op=False,
+               use_calc_stream=False):
     """
 
     Reduce a tensor over all ranks so that all get the result.
@@ -735,10 +739,12 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, use_calc_stream=True):
             should be float16, float32, float64, int32 or int64.
         op (ReduceOp.SUM|ReduceOp.MAX|ReduceOp.Min|ReduceOp.PROD): Optional. The operation used. Default value is ReduceOp.SUM.
         group (Group): The group instance return by new_group or None for global default group.
-        use_calc_stream (bool): Wether to use calculation stream (True) or communication stream (False).
-            Default to True.
+        async_op (bool, optional): Indicate whether this operation is async or not. Default to False.
+        use_calc_stream (bool, optional): Wether to use calculation stream (True) or communication stream (False).
+            Default to False. This option is only valid when the operation is in sync behavior.
 
     Returns:
+         
         None.
 
     Examples:
@@ -767,12 +773,17 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, use_calc_stream=True):
     if in_dygraph_mode():
         op_type = _get_reduce_op(op, "all_reduce")
         group = _get_default_group() if group is None else group
-        task = group.process_group.allreduce(tensor, op_type)
+        if async_op and use_calc_stream:
+            raise RuntimeError(
+                "use_calc_stream can only be true in sync op behavior.")
+        task = None
         if use_calc_stream:
-            task.wait()
-            return None
+            group.process_group.allreduce_on_calc_stream(tensor, op_type)
         else:
-            return task
+            task = group.process_group.allreduce(tensor, op_type)
+        if not async_op and not use_calc_stream:
+            task.wait()
+        return task
 
     ring_id = 0 if group is None else group.id
     if _non_static_mode():

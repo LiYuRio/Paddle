@@ -89,6 +89,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     return std::string(NCCL_BACKEND_NAME);
   }
 
+  void AllReduceOnCalcStream(std::vector<phi::DenseTensor>& in_tensors,
+                             std::vector<phi::DenseTensor>& out_tensors,
+                             const AllreduceOptions&) override;
+
   std::shared_ptr<ProcessGroup::Task> AllReduce(
       std::vector<phi::DenseTensor>& in_tensors,
       std::vector<phi::DenseTensor>& out_tensors,
@@ -191,6 +195,12 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<phi::DenseTensor>& outputs,  // NOLINT
       Fn fn,
       CommType op_type);
+
+  template <typename Fn>
+  void CollectiveOnCalcStream(std::vector<phi::DenseTensor>& inputs,   // NOLINT
+                              std::vector<phi::DenseTensor>& outputs,  // NOLINT
+                              Fn fn,
+                              CommType op_type);
 
   template <typename Fn>
   void Collective(const phi::DenseTensor*,

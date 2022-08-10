@@ -82,6 +82,14 @@ class ProcessGroup {
 
   virtual const std::string GetBackendName() const = 0;
 
+  virtual void AllReduceOnCalcStream(
+      std::vector<phi::DenseTensor>& /* input tensors */,   // NOLINT
+      std::vector<phi::DenseTensor>& /* output tensors */,  // NOLINT
+      const AllreduceOptions&) {
+    PADDLE_THROW(platform::errors::InvalidArgument(
+        "ProcessGroup%s does not support allreduce", GetBackendName()));
+  }
+
   virtual std::shared_ptr<ProcessGroup::Task> AllReduce(
       std::vector<phi::DenseTensor>& /* input tensors */,   // NOLINT
       std::vector<phi::DenseTensor>& /* output tensors */,  // NOLINT

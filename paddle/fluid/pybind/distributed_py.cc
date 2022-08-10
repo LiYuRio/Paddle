@@ -118,6 +118,23 @@ void BindDistributed(py::module *m) {
           .def("size", &distributed::ProcessGroup::GetSize)
           .def("name", &distributed::ProcessGroup::GetBackendName)
           .def(
+              "allreduce_on_calc_stream",
+              [](distributed::ProcessGroup &self,
+                 py::handle py_tensor,
+                 distributed::ReduceOp op) {
+                auto tensor = CastPyArg2Tensor(py_tensor.ptr(), 0);
+                distributed::AllreduceOptions opts;
+                opts.reduce_op = op;
+                auto dense =
+                    std::dynamic_pointer_cast<phi::DenseTensor>(tensor.impl());
+                std::vector<phi::DenseTensor> tensors = {*dense};
+                self.AllReduceOnCalcStream(tensors, tensors, opts);
+              },
+              py::arg("tensor"),
+              py::arg("op") = distributed::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allreduce",
               [](distributed::ProcessGroup &self,
                  py::handle py_tensor,
@@ -128,7 +145,7 @@ void BindDistributed(py::module *m) {
                 auto dense =
                     std::dynamic_pointer_cast<phi::DenseTensor>(tensor.impl());
                 std::vector<phi::DenseTensor> tensors = {*dense};
-                return self.AllReduce(tensors, tensors, opts);
+                self.AllReduce(tensors, tensors, opts);
               },
               py::arg("tensor"),
               py::arg("op") = distributed::ReduceOp::SUM,

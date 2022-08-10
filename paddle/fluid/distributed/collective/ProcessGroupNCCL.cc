@@ -273,6 +273,44 @@ std::shared_ptr<ProcessGroup::Task> ProcessGroupNCCL::Collective(
 }
 
 template <typename Fn>
+void ProcessGroupNCCL::CollectiveOnCalcStream(
+    std::vector<phi::DenseTensor>& inputs,
+    std::vector<phi::DenseTensor>& outputs,
+    Fn fn,
+    CommType op_type) {
+  const auto places = GetPlaceList(inputs);
+  const auto key = GetKeyFromPlaces(places);
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (places_to_ncclcomm_.find(key) == places_to_ncclcomm_.end()) {
+      CreateNCCLManagerCache(key, places);
+    }
+  }
+
+  auto& nccl_comms = places_to_ncclcomm_[key];
+
+  // construct uninitialize guard for device
+  platform::CUDADeviceGuard cuda_guard;
+
+  {
+    platform::NCCLGroupGuard nccl_guard;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      cuda_guard.SetDevice(places[i]);
+      auto* default_ctx = static_cast<phi::GPUContext*>(
+          platform::DeviceContextPool::Instance().Get(places[i]));
+      fn(inputs[i],
+         outputs[i],
+         nccl_comms[i]->GetNcclComm(),
+         default_ctx->stream());
+      if (FLAGS_use_stream_safe_cuda_allocator) {
+        memory::RecordStream(inputs[i].Holder(), default_ctx->stream());
+      }
+    }
+  }
+}
+
+template <typename Fn>
 void ProcessGroupNCCL::Collective(const phi::DenseTensor* in,
                                   phi::DenseTensor* out,
                                   Fn fn,
@@ -368,6 +406,33 @@ std::shared_ptr<ProcessGroup::Task> ProcessGroupNCCL::AllReduce(
       true,
       platform::errors::InvalidArgument("All inputs should be in CudaPlace."));
   return Collective(
+      in_tensors,
+      out_tensors,
+      [&](const phi::DenseTensor& input,
+          phi::DenseTensor& output,
+          ncclComm_t comm,
+          const gpuStream_t& stream) {
+        return platform::dynload::ncclAllReduce(
+            input.data(),
+            output.data(),
+            input.numel(),
+            platform::ToNCCLDataType(input.type()),
+            ToNCCLRedType(opts.reduce_op),
+            comm,
+            stream);
+      },
+      CommType::ALLREDUCE);
+}
+
+void ProcessGroupNCCL::AllReduceOnCalcStream(
+    std::vector<phi::DenseTensor>& in_tensors,
+    std::vector<phi::DenseTensor>& out_tensors,
+    const AllreduceOptions& opts) {
+  PADDLE_ENFORCE_EQ(
+      CheckTensorsInCudaPlace(in_tensors),
+      true,
+      platform::errors::InvalidArgument("All inputs should be in CudaPlace."));
+  CollectiveOnCalcStream(
       in_tensors,
       out_tensors,
       [&](const phi::DenseTensor& input,
