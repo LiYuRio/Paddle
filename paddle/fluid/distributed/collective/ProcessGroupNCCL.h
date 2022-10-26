@@ -263,6 +263,8 @@ class ProcessGroupNCCL : public ProcessGroupStream {
 
   ncclComm_t NCCLComm(const Place& place) const;
 
+  void WaitTaskComplete(ProcessGroup::Task* task) override;
+
  protected:
   virtual std::shared_ptr<ProcessGroupNCCL::NCCLTask> CreateTask(
       std::vector<Place> places,

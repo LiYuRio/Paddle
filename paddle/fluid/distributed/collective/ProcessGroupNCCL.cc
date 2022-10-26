@@ -1611,5 +1611,15 @@ phi::DeviceContext* ProcessGroupNCCL::GetDeviceContext(
   }
 }
 
+void ProcessGroupNCCL::WaitTaskComplete(ProcessGroup::Task* task) {
+  auto* nccl_task = dynamic_cast<ProcessGroupNCCL::NCCLTask*>(task);
+  PADDLE_ENFORCE(nccl_task,
+                 platform::errors::InvalidArgument(
+                     "Failed to dynamic cast Task to NCCLTask."));
+  auto iter = places_to_ctx_.begin();
+  auto* ctx = static_cast<phi::GPUContext*>(iter->second[0].get());
+  ctx->WaitEvent(nccl_task->control_events_[0].GetRawCudaEvent());
+}
+
 }  //  namespace distributed
 }  //  namespace paddle

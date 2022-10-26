@@ -21,6 +21,7 @@ limitations under the License. */
 #undef _XOPEN_SOURCE
 #endif
 
+#include <pybind11/functional.h>
 #include "paddle/fluid/distributed/collective/ProcessGroup.h"
 #include "paddle/fluid/distributed/collective/ProcessGroupStream.h"
 #include "paddle/fluid/distributed/collective/Types.h"
@@ -1345,7 +1346,24 @@ void BindDistributed(py::module *m) {
            py::call_guard<py::gil_scoped_release>())
       .def("synchronize",
            &distributed::ProcessGroup::Task::Synchronize,
-           py::call_guard<py::gil_scoped_release>());
+           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "prepare",
+          [](distributed::ProcessGroup::Task *task,
+             const std::shared_ptr<distributed::ProcessGroup> &group) {
+            task->SetDependencyGroup(group);
+            return task;
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "then",
+          [](distributed::ProcessGroup::Task *self,
+             const std::function<
+                 std::shared_ptr<distributed::ProcessGroup::Task>()> &func) {
+            self->GetDependencyGroup()->WaitTaskComplete(self);
+            return func();
+          },
+          py::call_guard<py::gil_scoped_release>());
 
 #if defined(PADDLE_WITH_GLOO)
   py::class_<ProcessGroupGloo, std::shared_ptr<ProcessGroupGloo>>(

@@ -67,6 +67,12 @@ class ProcessGroup {
     virtual bool Wait(std::chrono::milliseconds timeout = kWaitTimeout);
     virtual void Synchronize();
     bool IsSync() const { return sync_op_; }
+    void SetDependencyGroup(const std::shared_ptr<ProcessGroup>& group) {
+      dep_group_ = group;
+    }
+    const std::shared_ptr<ProcessGroup>& GetDependencyGroup() const {
+      return dep_group_;
+    }
 
    protected:
     const int rank_;
@@ -76,6 +82,7 @@ class ProcessGroup {
 
    private:
     bool sync_op_{true};
+    std::shared_ptr<ProcessGroup> dep_group_{nullptr};
   };
 
   explicit ProcessGroup(int rank,
@@ -320,6 +327,12 @@ class ProcessGroup {
       const ReduceScatterOptions&) {
     PADDLE_THROW(platform::errors::InvalidArgument(
         "ProcessGroup%s does not support ReduceScatter", GetBackendName()));
+  }
+
+  virtual void WaitTaskComplete(ProcessGroup::Task* task) {
+    PADDLE_THROW(platform::errors::InvalidArgument(
+        "ProcessGroup%s does not support to wait previous task completed",
+        GetBackendName()));
   }
 
  protected:
