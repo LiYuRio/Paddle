@@ -462,5 +462,23 @@ class CNCLCommContext {
 
 #endif
 
+class RequestIdMap {
+ public:
+  static RequestIdMap& Instance() {
+    static RequestIdMap instance;
+    return instance;
+  }
+
+  const std::string& GetRequestResult(int request_id) {
+    return id_to_result_map_[request_id];
+  }
+  void Insert(int request_id, const std::string& result) {
+    id_to_result_map_.emplace(request_id, result);
+  }
+
+ private:
+  std::map<int, std::string> id_to_result_map_;
+};
+
 }  // namespace platform
 }  // namespace paddle
