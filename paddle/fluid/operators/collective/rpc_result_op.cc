@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "paddle/fluid/framework/op_registry.h"
-#include "paddle/fluid/platform/collective_helper.h"
-#include "paddle/phi/common/pstring.h"
+#include "paddle/fluid/operators/collective/rpc_result_op.h"
+
+#include "paddle/fluid/framework/op_proto_maker.h"
 
 namespace paddle {
 namespace operators {
@@ -28,7 +28,8 @@ class RpcResultOp : public framework::OperatorWithKernel {
  protected:
   phi::KernelKey GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    return phi::KernelKey(OperatorWithKernel::IndicateVarDataType(ctx, "X"),
+    int dtype = ctx.Attr<int>("dtype");
+    return phi::KernelKey(framework::proto::VarType::Type(dtype),
                           ctx.GetPlace());
   }
 };
@@ -36,28 +37,19 @@ class RpcResultOp : public framework::OperatorWithKernel {
 class RpcResultOpMaker : public framework::OpProtoAndCheckerMaker {
  public:
   void Make() {
-    AddOutput("X", "(Tensor) tensor for output.");
+    AddOutput("Out", "(Tensor) tensor for output.");
+    AddAttr<int>("dtype",
+                 "(int default 5('float32)) Output tensor's data type.")
+        .SetDefault(5);
     AddAttr<int>("request_id", "(int default 0) Unique id for request.")
         .SetDefault(0);
     AddAttr<std::string>("service_name",
-                         "(string default service_name) Service name.")
+                         "(string default service_name) Service's name.")
         .SetDefault("service_name");
     AddComment(R"DOC(
-RpcResultOpMaker Operator
+Rpc Result Operator
 
 )DOC");
-  }
-};
-
-template <typename T>
-class RpcResultOpKernel : public framework::OpKernel<T> {
- public:
-  void Compute(const framework::ExecutionContext& ctx) const override {
-    VLOG(3) << "Run in Rpc result op";
-    int request_id = ctx.Attr<int>("request_id");
-    const auto& result =
-        platform::RequestIdMap::Instance().GetRequestResult(request_id);
-    VLOG(3) << result;
   }
 };
 
@@ -72,4 +64,7 @@ REGISTER_OP_WITHOUT_GRADIENT(rpc_result,
 
 REGISTER_OP_CPU_KERNEL(rpc_result,
                        ops::RpcResultOpKernel<float>,
+                       ops::RpcResultOpKernel<double>,
+                       ops::RpcResultOpKernel<int>,
+                       ops::RpcResultOpKernel<int64_t>,
                        ops::RpcResultOpKernel<phi::dtype::pstring>);

@@ -472,7 +472,11 @@ class RequestIdMap {
   const std::string& GetRequestResult(int request_id) {
     return id_to_result_map_[request_id];
   }
+
   void Insert(int request_id, const std::string& result) {
+    if (request_id < 0) {
+      LOG(WARNING) << "Request id is negative. Requests may exceed limits.";
+    }
     id_to_result_map_.emplace(request_id, result);
   }
 

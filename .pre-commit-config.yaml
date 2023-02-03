@@ -3,6 +3,7 @@ exclude: |
     (?x)^(
         patches/.+|
         paddle/fluid/framework/fleet/heter_ps/cudf/.+|
+        paddle/fluid/operators/collective/thirdparty/json.h|
         paddle/fluid/distributed/ps/thirdparty/round_robin.h|
         python/paddle/utils/gast/.+|
         .+_pb2\.py|

@@ -2858,6 +2858,7 @@ class Operator:
         'c_comm_init_hccl',
         'copy_cross_scope',
         'c_gen_cncl_id',
+        'rpc_call',
     }
 
     def __init__(
