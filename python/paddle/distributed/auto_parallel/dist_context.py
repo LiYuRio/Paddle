@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License
 
+import time
 import copy
 from collections import defaultdict
 import paddle.fluid
@@ -24,7 +25,7 @@ from .dist_attribute import OperatorDistributedAttribute
 from .dist_tensor import DistributedTensor
 from .dist_op import DistributedOperator
 from .process_mesh import ProcessMesh
-from .utils import is_loss_grad_op, is_loss_op
+from .utils import is_loss_grad_op, is_loss_op, is_valid_list_index
 
 # There always exists a default context for user. And user can set it to another one.
 _g_default_distributed_context = None
@@ -437,13 +438,18 @@ class DistributedContext:
 
             if with_graph:
                 set_flags({"FLAGS_convert_all_blocks": True})
+                start_time = time.time()
                 self._serial_graph = framework.IrGraph(
                     core.Graph(self._serial_main_program.desc)
                 )
+                print("bot-context-graph-build: ", time.time() - start_time, flush=True)
                 self._init_dist_attr_for_graph()
+                start_time = time.time()
                 self._need_copy_dist_attr_to_graph = False
+                print("bot-context-graph-dist: ", time.time() - start_time, flush=True)
 
         if self._need_copy_dist_attr_to_graph and with_graph:
+            # print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% here 1234", flush=True)
             self.copy_dist_attr_from_program_to_graph()
 
     def add_process_mesh(self, process_mesh):
@@ -635,23 +641,32 @@ class DistributedContext:
                     return True
             return False
 
+        start_time = time.time()
         serial_ordered_tensor_nodes = []
         serial_ordered_op_nodes = []
         all_nodes = []
         for idx, graph in enumerate(self._serial_graph.all_sub_graphs()):
             for node in graph.all_nodes():
                 all_nodes.append(node)
+        print("bot-context-graph-dist-ordering-0: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         for node in all_nodes:
             if node.is_var() and node.var() is not None:
                 serial_ordered_tensor_nodes.append(node)
             if node.is_op() and node.op() is not None:
                 serial_ordered_op_nodes.append(node)
+        print("bot-context-graph-dist-ordering-1: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         serial_ordered_tensor_nodes.sort(
             key=lambda node: node.node.original_desc_id()
         )
+        print("bot-context-graph-dist-ordering-2: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         serial_ordered_op_nodes.sort(
             key=lambda node: node.node.original_desc_id()
         )
+        print("bot-context-graph-dist-ordering-3: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         num_nodes_before = len(serial_ordered_tensor_nodes) + len(
             serial_ordered_op_nodes
         )
@@ -659,6 +674,8 @@ class DistributedContext:
         new_serial_ordered_tensor_nodes = []
         new_serial_ordered_op_nodes = []
         new_serial_ordered_nodes = []
+        tmp_time = 0
+        # TODO: user a counter for the following sort
         for op_node in serial_ordered_op_nodes:
             tensor_nodes = []
             for tensor_node in op_node.inputs:
@@ -669,7 +686,9 @@ class DistributedContext:
                 ):
                     tensor_nodes.append(tensor_node)
                     new_serial_ordered_tensor_nodes.append(tensor_node)
+            inner_start_time = time.time()
             tensor_nodes.sort(key=lambda node: node.node.original_desc_id())
+            tmp_time += time.time() - inner_start_time
             new_serial_ordered_nodes.extend(tensor_nodes)
             new_serial_ordered_nodes.append(op_node)
             new_serial_ordered_op_nodes.append(op_node)
@@ -682,14 +701,23 @@ class DistributedContext:
                 ):
                     tensor_nodes.append(tensor_node)
                     new_serial_ordered_tensor_nodes.append(tensor_node)
+            inner_start_time = time.time()
             tensor_nodes.sort(key=lambda node: node.node.original_desc_id())
+            tmp_time += time.time() - inner_start_time
             new_serial_ordered_nodes.extend(tensor_nodes)
+        print("bot-context-graph-dist-ordering-4: ", tmp_time, flush=True)
+        print("bot-context-graph-dist-ordering-5: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         new_serial_ordered_tensor_nodes.sort(
             key=lambda node: node.node.original_desc_id()
         )
+        print("bot-context-graph-dist-ordering-6: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         new_serial_ordered_op_nodes.sort(
             key=lambda node: node.node.original_desc_id()
         )
+        print("bot-context-graph-dist-ordering-7: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         self._serial_ordered_tensor_nodes = new_serial_ordered_tensor_nodes
         self._serial_ordered_op_nodes = new_serial_ordered_op_nodes
         self._serial_ordered_nodes = new_serial_ordered_nodes
@@ -704,14 +732,31 @@ class DistributedContext:
             print(
                 "WARNING: there are some orphan tensors or ops which are not used in the execution."
             )
+        print("bot-context-graph-dist-ordering-8: ", time.time() - start_time, flush=True)
+        # for node in serial_ordered_tensor_nodes:
+        #     print("[before ordering] t: ", _node_id(node), node.var().name(),flush=True)
+        # for node in serial_ordered_op_nodes:
+        #     print("[before ordering] o: ", _node_id(node), node.op().type(), flush=True)
+        # for node in new_serial_ordered_tensor_nodes:
+        #     print("[after  ordering] t: ", _node_id(node), node.var().name(),flush=True)
+        # for node in new_serial_ordered_op_nodes:
+        #     print("[after  ordering] o: ", _node_id(node), node.op().type(), flush=True)
+        # for node in self._serial_orphan_tensor_nodes:
+        #     print("[after  ordering] a: ", _node_id(node), node.var().name(), flush=True)
+        # for node in new_serial_ordered_nodes:
+        #     print("[after  ordering] o: ", _node_id(node), flush=True)
 
     def _init_dist_attr_for_graph(self):
         # Convert program to graph and initialize the distributed attributes
+        start_time = time.time()
         self._order_nodes_by_program_order()
+        print("bot-context-graph-dist-ordering: ", time.time() - start_time, flush=True)
+        start_time = time.time()
         for node in self.serial_ordered_nodes:
             if node.is_var() and node.var() is not None:
                 dist_tensor = None
                 tensor_id = node.node.original_desc_id()
+                # TODO: Use dict and (id, original_id) for keys to remove this for loop
                 for (
                     cur_tensor_id,
                     cur_dist_tensor,
@@ -756,6 +801,15 @@ class DistributedContext:
                     dist_op.serial_op, dist_op.dist_attr
                 )
                 self._dist_ops_for_graph[serial_op_node_id] = new_dist_op
+        print("bot-context-graph-dist-init: ", time.time() - start_time, flush=True)
+        # for node_id, dist_tensor in self._dist_tensors_for_graph.items():
+        #     print("graph dist tensor: ", node_id, dist_tensor.serial_tensor.desc.id(), flush=True)
+        # for node_id, dist_op in self._dist_ops_for_graph.items():
+        #     print("graph dist     op: ", node_id, dist_op.serial_op.desc.id(), flush=True)
+        # for node_id, id in self._node_id_to_tensor_id.items():
+        #     print("graph dist tensor node_id: ", node_id, id, flush=True)
+        # for node_id, id in self._node_id_to_op_id.items():
+        #     print("graph dist     op node_id: ", node_id, id, flush=True)
 
     def clear_dist_info_for_program(self):
         self._dist_tensors_for_program.clear()
@@ -802,6 +856,66 @@ class DistributedContext:
                         or op_id == cur_dist_op.serial_op.desc.original_id()
                     ):
                         dist_op = cur_dist_op
+                assert (
+                    dist_op is not None
+                ), "Operator must have a distributed operator after the initialization for program."
+                serial_op_node_id = _node_id(node)
+                new_dist_op = DistributedOperator(
+                    dist_op.serial_op, dist_op.dist_attr
+                )
+                self._dist_ops_for_graph[serial_op_node_id] = new_dist_op
+
+    def copy_dist_attr_from_program_to_graph_bk(self):
+        for node in self.serial_ordered_nodes:
+            if node.is_var() and node.var() is not None:
+                dist_tensor = None
+                tensor_id = node.node.original_desc_id()
+                # for (
+                #     cur_tensor_id,
+                #     cur_dist_tensor,
+                # ) in self._dist_tensors_for_program.items():
+                #     if (
+                #         tensor_id == cur_tensor_id
+                #         or tensor_id
+                #         == cur_dist_tensor.serial_tensor.desc.original_id()
+                #     ):
+                #         dist_tensor = cur_dist_tensor
+                cur_dist_tensor = self._dist_tensors_for_program.get(tensor_id, None)
+                if cur_dist_tensor is not None:
+                    cur_tensor_id = tensor_id
+                else:
+                    cur_tensor_id = self._tensor_original_id_to_id[tensor_id]
+                    cur_dist_tensor  = self._dist_tensors_for_program.get(cur_tensor_id, None)
+                dist_tensor = cur_dist_tensor
+                assert (
+                    dist_tensor is not None
+                ), "Tensor must have a distributed tensor after the initialization for program."
+                serial_tensor_node_id = _node_id(node)
+                new_dist_tensor = DistributedTensor(
+                    dist_tensor.serial_tensor, dist_tensor.dist_attr
+                )
+                self._dist_tensors_for_graph[
+                    serial_tensor_node_id
+                ] = new_dist_tensor
+            if node.is_op() and node.op() is not None:
+                dist_op = None
+                op_id = node.node.original_desc_id()
+                # for (
+                #     cur_op_id,
+                #     cur_dist_op,
+                # ) in self._dist_ops_for_program.items():
+                #     if (
+                #         op_id == cur_op_id
+                #         or op_id == cur_dist_op.serial_op.desc.original_id()
+                #     ):
+                #         dist_op = cur_dist_op
+                cur_dist_op = self._dist_ops_for_program.get(op_id, None)
+                if cur_dist_op is not None:
+                    cur_op_id = op_id
+                else:
+                    cur_op_id = self._op_original_id_to_id[op_id]
+                    cur_dist_op  = self._dist_ops_for_program.get(cur_op_id, None)
+                dist_op = cur_dist_op
                 assert (
                     dist_op is not None
                 ), "Operator must have a distributed operator after the initialization for program."
