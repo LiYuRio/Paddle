@@ -298,7 +298,7 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     return EnqueueInterceptorMessage(msg);
   } 
 
-  if(FLAGS_fleetexecutor_debug_mode){
+  if(!FLAGS_fleetexecutor_debug_mode){
 	 VLOG(3) << "Send a message from interceptor " << src_id
 			  << " to interceptor " << dst_id
 			  << ", which are in different ranks.";
