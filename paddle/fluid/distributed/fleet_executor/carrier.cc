@@ -250,6 +250,17 @@ bool Carrier::Send(const InterceptorMessage& msg) {
         auto msg=messages_for_test_.back();
         messages_for_test_.pop_back();
 
+        int64_t src_id = msg.src_id();
+        // TODO(liyurui): compatible solution, will be removed completely in the
+        // future
+        if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
+            src_id == SOURCE_ID) {
+          src_id = msg.dst_id();
+        }
+        int64_t dst_id = msg.dst_id();
+        int64_t src_rank = GetRank(src_id);
+        int64_t dst_rank = GetRank(dst_id);
+
         VLOG(3) << "Send a cached message from interceptor " << src_id
           << " to interceptor " << dst_id
           << ", which are in different ranks.";
