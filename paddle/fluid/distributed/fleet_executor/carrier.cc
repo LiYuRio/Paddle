@@ -103,7 +103,7 @@ void Carrier::loop_to_send_msg() {
 
 		  VLOG(3) << "Send a cached message from interceptor " << src_id
 			<< " to interceptor " << dst_id
-			<< ", which are in different ranks.";
+			<< ", which are in different ranks, scope_idx:" << msg.scope_idx();
 
 		  if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
 			  LOG(FATAL) << "send msg error";
@@ -325,6 +325,10 @@ bool Carrier::Send(const InterceptorMessage& msg) {
       //std::time_t now_c = std::chrono::system_clock::to_time_t(cache_begin_));
       VLOG(3) << "messages_for_test_ empty, reset cache_begin_";
     }
+
+    VLOG(3) << "Cache message from interceptor " << src_id
+		<< " to interceptor " << dst_id
+		<< ", which are in different ranks, scope_idx:" << msg.scope_idx();
     messages_for_test_.emplace_back(msg);
   }
 
