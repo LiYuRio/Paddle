@@ -258,7 +258,6 @@ bool Carrier::Send(const InterceptorMessage& msg) {
           src_id = msg.dst_id();
         }
         int64_t dst_id = msg.dst_id();
-        int64_t src_rank = GetRank(src_id);
         int64_t dst_rank = GetRank(dst_id);
 
         VLOG(3) << "Send a cached message from interceptor " << src_id
