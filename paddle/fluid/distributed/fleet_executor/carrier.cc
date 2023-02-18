@@ -72,7 +72,7 @@ void Carrier::loop_to_send_msg() {
 		auto now = std::chrono::steady_clock::now();
 		auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - c_begin).count();
 		
-		if(q_size<3 && delta <5000){
+		if(q_size<2 && delta <5000){
 		  //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
 		  VLOG(3) << "messages_for_test_ q_size:" << q_size 
 				  << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
