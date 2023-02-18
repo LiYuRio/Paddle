@@ -57,7 +57,7 @@ void Carrier::Init(
   cache_begin_ == std::chrono::steady_clock::now();
 }
 
-void TaskLoopThread::loop_to_send_msg() {
+void Carrier::loop_to_send_msg() {
   while(1){
     int  q_size=0;
 	std::chrono::time_point<std::chrono::steady_clock> c_begin;
@@ -71,11 +71,13 @@ void TaskLoopThread::loop_to_send_msg() {
     auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - c_begin).count();
     
     if(q_size<3 or delta <5000){
-      VLOG(3) << "messages_for_test_ q_size:" << q_size << ", delta:" << delta << ", sleep 1000ms";
-      std::this_thread::sleep_for(1000ms);;
-      continue
+      //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+      VLOG(3) << "messages_for_test_ q_size:" << q_size 
+              << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
+      std::this_thread::sleep_for(1000);
+      continue;
     }else{
-      break
+      break;
     }
   }
 
@@ -99,7 +101,7 @@ void TaskLoopThread::loop_to_send_msg() {
         << ", which are in different ranks.";
 
       if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
-          VLOG(FATAL) << "send msg error";
+          LOG(FATAL) << "send msg error";
       }
   }
 }
@@ -298,8 +300,9 @@ bool Carrier::Send(const InterceptorMessage& msg) {
 
     std::unique_lock<std::mutex> lock(running_mutex_);
     if(messages_for_test_.empty()){
-      cache_begin_ = std::chrono::steady_clock::now();
-      VLOG(3) << "messages_for_test_ empty, cache_begin_" << cache_begin_;
+      // cache_begin_ = std::chrono::steady_clock::now();
+      std::time_t now_c = std::chrono::system_clock::to_time_t(cache_begin_));
+      VLOG(3) << "messages_for_test_ empty";
     }
     messages_for_test_.emplace_back(msg);
   }
