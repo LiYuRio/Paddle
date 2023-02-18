@@ -74,9 +74,9 @@ void Carrier::loop_to_send_msg() {
 		
 		if(q_size<2 && delta <5000){
 		  //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-		  VLOG(3) << "messages_for_test_ q_size:" << q_size 
-				  << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
-		  std::this_thread::sleep_for(std::chrono::seconds(1));
+		  //VLOG(3) << "messages_for_test_ q_size:" << q_size 
+		  //	    << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
+		  std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		  continue;
 		}else{
 		  VLOG(3) << "messages_for_test_ q_size:" << q_size 
