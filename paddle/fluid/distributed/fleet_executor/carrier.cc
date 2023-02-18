@@ -108,6 +108,7 @@ void Carrier::loop_to_send_msg() {
 		  if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
 			  LOG(FATAL) << "send msg error";
 		  }
+		  std::this_thread::sleep_for(std::chrono::milliseconds(2));
 	  }
 
     cache_begin_ = std::chrono::steady_clock::now();
