@@ -77,13 +77,11 @@ void Carrier::loop_to_send_msg() {
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
     }else{
+      VLOG(3) << "messages_for_test_ q_size:" << q_size 
+          << ", delta:" << delta << ", will send all msg" ;
       break;
     }
   }
-
-
-  VLOG(3) << "messages_for_test_ q_size:" << q_size 
-          << ", delta:" << delta << ", will send all msg" ;
 
  {
   std::lock_guard<std::mutex> lock(running_mutex_);
