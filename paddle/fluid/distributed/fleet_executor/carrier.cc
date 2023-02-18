@@ -74,13 +74,14 @@ void Carrier::loop_to_send_msg() {
       //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
       VLOG(3) << "messages_for_test_ q_size:" << q_size 
               << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
-      std::this_thread::sleep_for(1000);
+      std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
     }else{
       break;
     }
   }
 
+ {
   std::lock_guard<std::mutex> lock(running_mutex_);
   while (!messages_for_test_.empty()) {
       auto msg=messages_for_test_.back();
@@ -104,6 +105,10 @@ void Carrier::loop_to_send_msg() {
           LOG(FATAL) << "send msg error";
       }
   }
+
+  cache_begin_ = std::chrono::steady_clock::now();
+ }
+ VLOG(3) << "reset cache_begin_";
 }
 
 void Carrier::Init(
@@ -300,9 +305,9 @@ bool Carrier::Send(const InterceptorMessage& msg) {
 
     std::unique_lock<std::mutex> lock(running_mutex_);
     if(messages_for_test_.empty()){
-      // cache_begin_ = std::chrono::steady_clock::now();
-      std::time_t now_c = std::chrono::system_clock::to_time_t(cache_begin_));
-      VLOG(3) << "messages_for_test_ empty";
+      cache_begin_ = std::chrono::steady_clock::now();
+      //std::time_t now_c = std::chrono::system_clock::to_time_t(cache_begin_));
+      VLOG(3) << "messages_for_test_ empty, reset cache_begin_";
     }
     messages_for_test_.emplace_back(msg);
   }
