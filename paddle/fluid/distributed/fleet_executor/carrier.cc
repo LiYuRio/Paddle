@@ -234,7 +234,7 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     return EnqueueInterceptorMessage(msg);
   } 
 
-  if(!(Flags_fleetexecutor_debug_mode && msg.message_type() == DATA_IS_READY)){
+  if(!(FLAGS_fleetexecutor_debug_mode && msg.message_type() == DATA_IS_READY)){
     VLOG(3) << "Send a message from interceptor " << src_id
           << " to interceptor " << dst_id
           << ", which are in different ranks.";
@@ -242,10 +242,11 @@ bool Carrier::Send(const InterceptorMessage& msg) {
   }
   
   {
+    VLOG(3) << "prepare executor debug";
+
     std::unique_lock<std::mutex> lock(running_mutex_);
     if(messages_for_test_.size()>=3){
-      while (!messages_for_test_.empty())
-      {
+      while (!messages_for_test_.empty()) {
         auto msg=messages_for_test_.back();
         messages_for_test_.pop_back();
 
@@ -253,7 +254,9 @@ bool Carrier::Send(const InterceptorMessage& msg) {
           << " to interceptor " << dst_id
           << ", which are in different ranks.";
 
-        GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
+        if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
+            return false;
+        }
       }
     }else{
       VLOG(3) << "Cache a message from interceptor " << src_id
@@ -262,6 +265,8 @@ bool Carrier::Send(const InterceptorMessage& msg) {
       messages_for_test_.emplace_back(msg);
     }
   }
+
+  return true;
 }
 
 Interceptor* Carrier::SetInterceptor(int64_t interceptor_id,
