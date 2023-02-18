@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "paddle/fluid/distributed/fleet_executor/carrier.h"
+#include "gflags/gflags.h"
 
 #include <algorithm>
 #include <vector>
@@ -28,6 +29,8 @@
 #include "paddle/fluid/framework/variable.h"
 #include "paddle/fluid/framework/variable_helper.h"
 
+DECLARE_bool(fleetexecutor_debug_mode);
+
 namespace paddle {
 namespace distributed {
 
@@ -37,6 +40,7 @@ USE_INTERCEPTOR(Amplifier);
 USE_INTERCEPTOR(Sink);
 USE_INTERCEPTOR(Cond);
 USE_INTERCEPTOR(Start);
+
 
 void Carrier::Init(
     int64_t rank,
@@ -230,12 +234,51 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     VLOG(3) << "Send a message from interceptor " << src_id
             << " to interceptor " << dst_id << ", which are in the same ranks.";
     return EnqueueInterceptorMessage(msg);
-  } else {
+  } 
+
+  if(!(FLAGS_fleetexecutor_debug_mode && msg.message_type() == DATA_IS_READY)){
     VLOG(3) << "Send a message from interceptor " << src_id
-            << " to interceptor " << dst_id
-            << ", which are in different ranks.";
+          << " to interceptor " << dst_id
+          << ", which are in different ranks.";
     return GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
   }
+  
+  {
+    VLOG(3) << "prepare executor debug";
+
+    std::unique_lock<std::mutex> lock(running_mutex_);
+    if(messages_for_test_.size()>=3){
+      while (!messages_for_test_.empty()) {
+        auto msg=messages_for_test_.back();
+        messages_for_test_.pop_back();
+
+        int64_t src_id = msg.src_id();
+        // TODO(liyurui): compatible solution, will be removed completely in the
+        // future
+        if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
+            src_id == SOURCE_ID) {
+          src_id = msg.dst_id();
+        }
+        int64_t dst_id = msg.dst_id();
+        int64_t dst_rank = GetRank(dst_id);
+
+        VLOG(3) << "Send a cached message from interceptor " << src_id
+          << " to interceptor " << dst_id
+          << ", which are in different ranks.";
+
+        if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
+            return false;
+        }
+      }
+    }else{
+      VLOG(3) << "Cache a message from interceptor " << src_id
+          << " to interceptor " << dst_id
+          << ", which are in different ranks.";
+      messages_for_test_.emplace_back(msg);
+    }
+  }
+
+  return true;
 }
 
 Interceptor* Carrier::SetInterceptor(int64_t interceptor_id,
