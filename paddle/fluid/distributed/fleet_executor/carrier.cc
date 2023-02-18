@@ -58,7 +58,7 @@ void Carrier::Init(
 }
 
 void Carrier::loop_to_send_msg() {
-  VLOG(3) << "loop_send_msg loop now";
+  //VLOG(3) << "loop_send_msg loop now";
   while(1){
 	  while(1){
 		int  q_size=0;
