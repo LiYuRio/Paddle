@@ -298,7 +298,14 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     return EnqueueInterceptorMessage(msg);
   } 
 
-  if(!(FLAGS_fleetexecutor_debug_mode && msg.message_type() == DATA_IS_READY)){
+  if(FLAGS_fleetexecutor_debug_mode){
+	 VLOG(3) << "Send a message from interceptor " << src_id
+			  << " to interceptor " << dst_id
+			  << ", which are in different ranks.";
+	return GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
+  }
+
+  if(msg.message_type() != DATA_IS_READY){
     VLOG(3) << "Send a message from interceptor " << src_id
           << " to interceptor " << dst_id
           << ", which are in different ranks.";
