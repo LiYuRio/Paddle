@@ -231,10 +231,34 @@ bool Carrier::Send(const InterceptorMessage& msg) {
             << " to interceptor " << dst_id << ", which are in the same ranks.";
     return EnqueueInterceptorMessage(msg);
   } else {
-    VLOG(3) << "Send a message from interceptor " << src_id
+    if(!(Flags_fleetexecutor_debug_mode && msg.message_type() == DATA_IS_READY)){
+      VLOG(3) << "Send a message from interceptor " << src_id
             << " to interceptor " << dst_id
             << ", which are in different ranks.";
-    return GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
+      return GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
+    }
+    
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if(messages_for_test_.size()>=3){
+        while (!messages_for_test_.empty())
+        {
+          auto msg=messages_for_test_.back();
+          messages_for_test_.pop_back();
+
+          VLOG(3) << "Send a cached message from interceptor " << src_id
+            << " to interceptor " << dst_id
+            << ", which are in different ranks.";
+            
+          GlobalVal<MessageBus>::Get()->Send(dst_rank, msg);
+        }
+      }else{
+        VLOG(3) << "Cache a message from interceptor " << src_id
+            << " to interceptor " << dst_id
+            << ", which are in different ranks.";
+        messages_for_test_.emplace_back(msg);
+      }
+    }
   }
 }
 
