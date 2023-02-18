@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <vector>
 #include <queue>
+#include <thread>
 
 #include <chrono>
 
@@ -126,9 +127,7 @@ class Carrier final {
 
   std::deque<InterceptorMessage> messages_for_test_;
   std::thread test_thread_;
-  //int time_elapsed_=0;
-  std::chrono::steady_clock::time_point test_begin_;// = std::chrono::steady_clock::now();
-  //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::chrono::time_point<std::chrono::steady_clock> cache_begin_;
 
   void loop_to_send_msg();
 };

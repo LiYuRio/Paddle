@@ -53,22 +53,22 @@ void Carrier::Init(
   thread_pool_.SetThreadNum(thread_num_);
   thread_pool_.Start();
 
-  thread_ = std::thread([this]() { loop_to_send_msg(); });
-  test_begin_ == std::chrono::steady_clock::now();
+  test_thread_ = std::thread([this]() { loop_to_send_msg(); });
+  cache_begin_ == std::chrono::steady_clock::now();
 }
 
 void TaskLoopThread::loop_to_send_msg() {
   while(1){
     int  q_size=0;
-    std::chrono::steady_clock::time_point begin;
+	std::chrono::time_point<std::chrono::steady_clock> c_begin;
     {
       std::lock_guard<std::mutex> lock(running_mutex_);
       q_size = messages_for_test_.size();
-      begin = test_begin_;
+      c_begin = cache_begin_;
     }
 
     auto now = std::chrono::steady_clock::now();
-    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - begin).count();
+    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - c_begin).count();
     
     if(q_size<3 or delta <5000){
       VLOG(3) << "messages_for_test_ q_size:" << q_size << ", delta:" << delta << ", sleep 1000ms";
@@ -298,8 +298,8 @@ bool Carrier::Send(const InterceptorMessage& msg) {
 
     std::unique_lock<std::mutex> lock(running_mutex_);
     if(messages_for_test_.empty()){
-      test_begin_ = std::chrono::steady_clock::now();
-      VLOG(3) << "messages_for_test_ empty, test_begin_" << test_begin_;
+      cache_begin_ = std::chrono::steady_clock::now();
+      VLOG(3) << "messages_for_test_ empty, cache_begin_" << cache_begin_;
     }
     messages_for_test_.emplace_back(msg);
   }
