@@ -58,59 +58,62 @@ void Carrier::Init(
 }
 
 void Carrier::loop_to_send_msg() {
+  VLOG(3) << "loop_send_msg loop now";
   while(1){
-    int  q_size=0;
-	std::chrono::time_point<std::chrono::steady_clock> c_begin;
-    {
-      std::lock_guard<std::mutex> lock(running_mutex_);
-      q_size = messages_for_test_.size();
-      c_begin = cache_begin_;
-    }
+	  while(1){
+		int  q_size=0;
+		std::chrono::time_point<std::chrono::steady_clock> c_begin;
+		{
+		  std::lock_guard<std::mutex> lock(running_mutex_);
+		  q_size = messages_for_test_.size();
+		  c_begin = cache_begin_;
+		}
 
-    auto now = std::chrono::steady_clock::now();
-    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - c_begin).count();
-    
-    if(q_size<3 && delta <5000){
-      //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-      VLOG(3) << "messages_for_test_ q_size:" << q_size 
-              << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
-      std::this_thread::sleep_for(std::chrono::seconds(1));
-      continue;
-    }else{
-      VLOG(3) << "messages_for_test_ q_size:" << q_size 
-          << ", delta:" << delta << ", will send all msg" ;
-      break;
-    }
+		auto now = std::chrono::steady_clock::now();
+		auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - c_begin).count();
+		
+		if(q_size<3 && delta <5000){
+		  //std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+		  VLOG(3) << "messages_for_test_ q_size:" << q_size 
+				  << ", delta:" << delta << ", will sleep 1000ms" ;//<<", now:" << now_c;
+		  std::this_thread::sleep_for(std::chrono::seconds(1));
+		  continue;
+		}else{
+		  VLOG(3) << "messages_for_test_ q_size:" << q_size 
+			  << ", delta:" << delta << ", will send all msg" ;
+		  break;
+		}
+	  }
+
+	 {
+	  std::lock_guard<std::mutex> lock(running_mutex_);
+	  while (!messages_for_test_.empty()) {
+		  auto msg=messages_for_test_.back();
+		  messages_for_test_.pop_back();
+
+		  int64_t src_id = msg.src_id();
+		  // TODO(liyurui): compatible solution, will be removed completely in the
+		  // future
+		  if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
+			  src_id == SOURCE_ID) {
+			src_id = msg.dst_id();
+		  }
+		  int64_t dst_id = msg.dst_id();
+		  int64_t dst_rank = GetRank(dst_id);
+
+		  VLOG(3) << "Send a cached message from interceptor " << src_id
+			<< " to interceptor " << dst_id
+			<< ", which are in different ranks.";
+
+		  if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
+			  LOG(FATAL) << "send msg error";
+		  }
+	  }
+
+    cache_begin_ = std::chrono::steady_clock::now();
+   }
   }
-
- {
-  std::lock_guard<std::mutex> lock(running_mutex_);
-  while (!messages_for_test_.empty()) {
-      auto msg=messages_for_test_.back();
-      messages_for_test_.pop_back();
-
-      int64_t src_id = msg.src_id();
-      // TODO(liyurui): compatible solution, will be removed completely in the
-      // future
-      if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
-          src_id == SOURCE_ID) {
-        src_id = msg.dst_id();
-      }
-      int64_t dst_id = msg.dst_id();
-      int64_t dst_rank = GetRank(dst_id);
-
-      VLOG(3) << "Send a cached message from interceptor " << src_id
-        << " to interceptor " << dst_id
-        << ", which are in different ranks.";
-
-      if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
-          LOG(FATAL) << "send msg error";
-      }
-  }
-
-  cache_begin_ = std::chrono::steady_clock::now();
- }
- VLOG(3) << "reset cache_begin_";
+  VLOG(3) << "reset cache_begin_";
 }
 
 void Carrier::Init(
