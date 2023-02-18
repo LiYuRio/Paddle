@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "paddle/fluid/distributed/fleet_executor/carrier.h"
+#include "gflags/gflags.h"
 
 #include <algorithm>
 #include <vector>
@@ -28,6 +29,8 @@
 #include "paddle/fluid/framework/variable.h"
 #include "paddle/fluid/framework/variable_helper.h"
 
+DECLARE_bool(fleetexecutor_debug_mode);
+
 namespace paddle {
 namespace distributed {
 
@@ -38,7 +41,6 @@ USE_INTERCEPTOR(Sink);
 USE_INTERCEPTOR(Cond);
 USE_INTERCEPTOR(Start);
 
-DECLARE_bool(fleetexecutor_debug_mode);
 
 void Carrier::Init(
     int64_t rank,
