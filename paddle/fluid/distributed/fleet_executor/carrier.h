@@ -23,6 +23,10 @@
 #include <vector>
 #include <queue>
 
+#include <chrono>
+
+
+
 #include "paddle/fluid/distributed/fleet_executor/interceptor.h"
 #include "paddle/fluid/distributed/fleet_executor/interceptor_message.pb.h"
 #include "paddle/fluid/distributed/fleet_executor/task_loop_thread_pool.h"
@@ -121,6 +125,12 @@ class Carrier final {
   std::unordered_set<int64_t> interceptor_ids_;
 
   std::deque<InterceptorMessage> messages_for_test_;
+  std::thread test_thread_;
+  //int time_elapsed_=0;
+  std::chrono::steady_clock::time_point test_begin_;// = std::chrono::steady_clock::now();
+  //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+  void loop_to_send_msg();
 };
 
 }  // namespace distributed

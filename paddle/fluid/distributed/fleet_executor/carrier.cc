@@ -52,6 +52,56 @@ void Carrier::Init(
   thread_num_ = 1;
   thread_pool_.SetThreadNum(thread_num_);
   thread_pool_.Start();
+
+  thread_ = std::thread([this]() { loop_to_send_msg(); });
+  test_begin_ == std::chrono::steady_clock::now();
+}
+
+void TaskLoopThread::loop_to_send_msg() {
+  while(1){
+    int  q_size=0;
+    std::chrono::steady_clock::time_point begin;
+    {
+      std::lock_guard<std::mutex> lock(running_mutex_);
+      q_size = messages_for_test_.size();
+      begin = test_begin_;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - begin).count();
+    
+    if(q_size<3 or delta <5000){
+      VLOG(3) << "messages_for_test_ q_size:" << q_size << ", delta:" << delta << ", sleep 1000ms";
+      std::this_thread::sleep_for(1000ms);;
+      continue
+    }else{
+      break
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(running_mutex_);
+  while (!messages_for_test_.empty()) {
+      auto msg=messages_for_test_.back();
+      messages_for_test_.pop_back();
+
+      int64_t src_id = msg.src_id();
+      // TODO(liyurui): compatible solution, will be removed completely in the
+      // future
+      if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
+          src_id == SOURCE_ID) {
+        src_id = msg.dst_id();
+      }
+      int64_t dst_id = msg.dst_id();
+      int64_t dst_rank = GetRank(dst_id);
+
+      VLOG(3) << "Send a cached message from interceptor " << src_id
+        << " to interceptor " << dst_id
+        << ", which are in different ranks.";
+
+      if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
+          VLOG(FATAL) << "send msg error";
+      }
+  }
 }
 
 void Carrier::Init(
@@ -247,35 +297,11 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     VLOG(3) << "prepare executor debug";
 
     std::unique_lock<std::mutex> lock(running_mutex_);
-    if(messages_for_test_.size()>=3){
-      while (!messages_for_test_.empty()) {
-        auto msg=messages_for_test_.back();
-        messages_for_test_.pop_back();
-
-        int64_t src_id = msg.src_id();
-        // TODO(liyurui): compatible solution, will be removed completely in the
-        // future
-        if (interceptor_id_to_rank_.find(src_id) == interceptor_id_to_rank_.end() &&
-            src_id == SOURCE_ID) {
-          src_id = msg.dst_id();
-        }
-        int64_t dst_id = msg.dst_id();
-        int64_t dst_rank = GetRank(dst_id);
-
-        VLOG(3) << "Send a cached message from interceptor " << src_id
-          << " to interceptor " << dst_id
-          << ", which are in different ranks.";
-
-        if(!GlobalVal<MessageBus>::Get()->Send(dst_rank, msg)){
-            return false;
-        }
-      }
-    }else{
-      VLOG(3) << "Cache a message from interceptor " << src_id
-          << " to interceptor " << dst_id
-          << ", which are in different ranks.";
-      messages_for_test_.emplace_back(msg);
+    if(messages_for_test_.empty()){
+      test_begin_ = std::chrono::steady_clock::now();
+      VLOG(3) << "messages_for_test_ empty, test_begin_" << test_begin_;
     }
+    messages_for_test_.emplace_back(msg);
   }
 
   return true;
