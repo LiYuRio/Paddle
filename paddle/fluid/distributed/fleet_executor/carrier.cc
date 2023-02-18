@@ -158,6 +158,9 @@ void Carrier::Init(
   thread_pool_.SetThreadNum(thread_num_);
   thread_pool_.Start();
 
+  test_thread_ = std::thread([this]() { loop_to_send_msg(); });
+  cache_begin_ == std::chrono::steady_clock::now();
+
   CreateInterceptors();
   is_init_ = true;
 }
