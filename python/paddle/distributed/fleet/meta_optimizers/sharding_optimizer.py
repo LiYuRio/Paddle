@@ -253,7 +253,8 @@ class ShardingOptimizer(MetaOptimizerBase):
                 'global_ring_id': 3,
                 'mp_degree': self.mp_degree,
                 'mp_rank': global_rank % self.mp_degree,
-                'scale_gradient': self.scale_gradient
+                'scale_gradient': self.scale_gradient,
+                "enable_partial_send_recv": pipeline_configs['enable_partial_send_recv']
             }
             main_program = loss.block.program
             main_program._pipeline_opt = pipeline_opt

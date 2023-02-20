@@ -52,6 +52,7 @@ class PipelineOptimizer(MetaOptimizerBase):
             'accumulate_steps']
         self.schedule_mode = user_defined_strategy.pipeline_configs[
             'schedule_mode']
+        self.enable_partial_send_recv = user_defined_strategy.pipeline_configs["enable_partial_send_recv"]
         self.use_sharding = user_defined_strategy.sharding
 
     def _can_apply(self):
@@ -193,6 +194,7 @@ class PipelineOptimizer(MetaOptimizerBase):
         program._pipeline_opt['use_sharding'] = False
         program._pipeline_opt['mp_degree'] = 1
         program._pipeline_opt['mp_rank'] = 0
+        program._pipeline_opt['enable_partial_send_recv'] = self.enable_partial_send_recv
         optimize_ops, params_grads, prog_list, pp_pair, ring_map = self.wrapped_opt.minimize(
             loss, startup_program, parameter_list, no_grad_set)
         self.startup_program = orig_startup_program._pipeline_opt[
