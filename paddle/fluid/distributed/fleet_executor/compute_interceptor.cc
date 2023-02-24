@@ -172,6 +172,11 @@ void ComputeInterceptor::DecreaseBuff(int64_t down_id) {
 }
 
 bool ComputeInterceptor::IsInputReady() {
+  std::map<int64_t, bool> scope_id_to_finish_flag;
+  if (!gen_step_to_scope_id_to_finish_flag_.empty()) {
+    scope_id_to_finish_flag =
+        gen_step_to_scope_id_to_finish_flag_.begin()->second;
+  }
   for (int64_t i = 0; i < node_->max_run_times(); ++i) {
     bool flag = true;
     for (auto& ins : in_readys_) {
@@ -179,7 +184,7 @@ bool ComputeInterceptor::IsInputReady() {
       flag = flag && (ready_size_map.at(i) != 0);
     }
     if (flag) {
-      for (auto iter : scope_id_to_finish_flag_) {
+      for (auto iter : scope_id_to_finish_flag) {
         if (iter.first == i) {
           break;
         } else if (!iter.second) {
@@ -339,13 +344,18 @@ void ComputeInterceptor::Run() {
 
     RunOps();
 
-    if (!scope_id_to_finish_flag_.empty()) {
+    if (!gen_step_to_scope_id_to_finish_flag_.empty()) {
+      auto iter = gen_step_to_scope_id_to_finish_flag_.begin();
+      auto& scope_id_to_finish_flag = iter->second;
       PADDLE_ENFORCE_NE(
-          scope_id_to_finish_flag_.find(cur_scope_id_),
-          scope_id_to_finish_flag_.end(),
+          scope_id_to_finish_flag.find(cur_scope_id_),
+          scope_id_to_finish_flag.end(),
           platform::errors::NotFound(
               "Can not find scope %ld in scope_id_to_finish", cur_scope_id_));
-      scope_id_to_finish_flag_.erase(cur_scope_id_);
+      scope_id_to_finish_flag.erase(cur_scope_id_);
+      if (scope_id_to_finish_flag.empty()) {
+        gen_step_to_scope_id_to_finish_flag_.erase(iter);
+      }
     }
 
     // send to downstream and increase buff used
@@ -402,10 +412,12 @@ void ComputeInterceptor::Compute(const InterceptorMessage& msg) {
     Run();
   } else if (msg.message_type() == START_LOOP) {
     VLOG(3) << "Compute interceptor " << interceptor_id_
-            << " receive start_loop " << msg.src_id() << " " << msg.scope_idx()
-            << " ";
+            << " receive start_loop " << msg.src_id() << " in scope "
+            << msg.scope_idx() << " with gen_step " << msg.gen_step();
     IncreaseReady(msg.src_id(), msg.scope_idx());
-    scope_id_to_finish_flag_.emplace(msg.scope_idx(), false);
+    int64_t gen_step = msg.gen_step();
+    gen_step_to_scope_id_to_finish_flag_[gen_step].emplace(msg.scope_idx(),
+                                                           false);
     Run();
   }
 }
