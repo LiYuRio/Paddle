@@ -21,6 +21,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <queue>
+#include <thread>
+
+#include <chrono>
 
 #include "paddle/fluid/distributed/fleet_executor/interceptor.h"
 #include "paddle/fluid/distributed/fleet_executor/interceptor_message.pb.h"
@@ -118,6 +122,12 @@ class Carrier final {
   int thread_num_;
   TaskLoopThreadPool thread_pool_;
   std::unordered_set<int64_t> interceptor_ids_;
+
+std::deque<InterceptorMessage> messages_for_test_;
+  std::thread test_thread_;
+  std::chrono::time_point<std::chrono::steady_clock> cache_begin_;
+
+  void loop_to_send_msg();
 };
 
 }  // namespace distributed
