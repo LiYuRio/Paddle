@@ -99,6 +99,15 @@ void StartInterceptor::Compute(const InterceptorMessage& msg) {
             << " " << finish_count_;
     finish_count_--;
     if (finish_count_ == 0) {
+      auto end = std::chrono::system_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+          end - start_time_);
+      VLOG(0) << "Spent "
+              << double(duration.count()) *
+                     std::chrono::microseconds::period::num /
+                     std::chrono::microseconds::period::den
+              << " seconds.";
+      start_time_ = std::chrono::system_clock::now();
       for (int64_t i = 0; i < batch_size_; ++i) {
         for (auto& outs : out_buffs_) {
           auto down_id = outs.first;
