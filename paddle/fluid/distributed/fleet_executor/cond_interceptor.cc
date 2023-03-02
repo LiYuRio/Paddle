@@ -128,7 +128,7 @@ void CondInterceptor::Compute(int64_t gen_step) {
                       platform::errors::InvalidArgument(
                           "Can not find scope id %ld in scope_id_to_gen_step",
                           cur_scope_id_));
-    VLOG(0) << "Finish loop in scope " << cur_scope_id_ << " with "
+    VLOG(3) << "Finish loop in scope " << cur_scope_id_ << " with "
             << scope_id_to_gen_step_.at(cur_scope_id_) << " generation steps.";
     scope_id_to_gen_step_.erase(cur_scope_id_);
     SendDataReady(stop_loop_id_);

@@ -102,7 +102,7 @@ void StartInterceptor::Compute(const InterceptorMessage& msg) {
       auto end = std::chrono::system_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
           end - start_time_);
-      VLOG(0) << "Spent "
+      VLOG(3) << "Spent "
               << double(duration.count()) *
                      std::chrono::microseconds::period::num /
                      std::chrono::microseconds::period::den
