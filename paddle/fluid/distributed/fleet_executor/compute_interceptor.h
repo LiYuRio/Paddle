@@ -54,6 +54,8 @@ class ComputeInterceptor : public Interceptor {
   bool CanWriteOutput();
   std::map<int64_t, std::map<int64_t, bool>>
       gen_step_to_scope_id_to_finish_flag_;
+  int64_t start_micro_step_{-1};
+  int64_t num_micro_step_{-1};
 };
 
 }  // namespace distributed

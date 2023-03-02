@@ -90,6 +90,8 @@ void CondInterceptor::SendDataReady(int64_t down_id) {
   InterceptorMessage ready_msg;
   ready_msg.set_message_type(DATA_IS_READY);
   ready_msg.set_scope_idx(cur_scope_id_);
+  ready_msg.set_start_micro_step(start_micro_step_);
+  ready_msg.set_num_micro_step(num_micro_step_);
   Send(down_id, ready_msg);
 }
 
@@ -98,6 +100,8 @@ void CondInterceptor::SendStartLoop(int64_t down_id, int64_t gen_step) {
   ready_msg.set_message_type(START_LOOP);
   ready_msg.set_scope_idx(cur_scope_id_);
   ready_msg.set_gen_step(gen_step);
+  ready_msg.set_start_micro_step(start_micro_step_);
+  ready_msg.set_num_micro_step(num_micro_step_);
   Send(down_id, ready_msg);
 }
 
@@ -134,6 +138,8 @@ void CondInterceptor::Compute(int64_t gen_step) {
 void CondInterceptor::Run(const InterceptorMessage& msg) {
   if (msg.message_type() == DATA_IS_READY) {
     cur_scope_id_ = msg.scope_idx();
+    start_micro_step_ = msg.start_micro_step();
+    num_micro_step_ = msg.num_micro_step();
     scope_id_to_gen_step_.emplace(cur_scope_id_, 0);
     Compute(/*gen_step=*/0);
   } else if (msg.message_type() == DATA_IS_USELESS) {

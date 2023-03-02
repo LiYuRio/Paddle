@@ -48,6 +48,8 @@ class CondInterceptor final : public Interceptor {
   int64_t stop_loop_id_;
   int64_t loop_id_;
   std::map<int64_t, int64_t> scope_id_to_gen_step_;
+  int64_t start_micro_step_;
+  int64_t num_micro_step_;
 };
 
 }  // namespace distributed
