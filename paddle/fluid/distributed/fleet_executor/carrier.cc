@@ -14,6 +14,7 @@
 
 #include "paddle/fluid/distributed/fleet_executor/carrier.h"
 
+#include <poll.h>
 #include <algorithm>
 #include <vector>
 
@@ -52,14 +53,15 @@ void Carrier::Init(
   thread_pool_.SetThreadNum(thread_num_);
   thread_pool_.Start();
 
-  test_thread_ = std::thread([this]() { loop_to_send_msg(); });
-  cache_begin_ == std::chrono::steady_clock::now();
+  if (FLAGS_fleetexecutor_debug_mode) {
+    test_thread_ = std::thread([this]() { loop_to_send_msg(); });
+    cache_begin_ = std::chrono::steady_clock::now();
+  }
 }
 
 void Carrier::loop_to_send_msg() {
-  // VLOG(3) << "loop_send_msg loop now";
-  while (1) {
-    while (1) {
+  while (true) {
+    while (true) {
       int q_size = 0;
       std::chrono::time_point<std::chrono::steady_clock> c_begin;
       {
@@ -162,8 +164,10 @@ void Carrier::Init(
   thread_pool_.SetThreadNum(thread_num_);
   thread_pool_.Start();
 
-  test_thread_ = std::thread([this]() { loop_to_send_msg(); });
-  cache_begin_ == std::chrono::steady_clock::now();
+  if (FLAGS_fleetexecutor_debug_mode) {
+    test_thread_ = std::thread([this]() { loop_to_send_msg(); });
+    cache_begin_ = std::chrono::steady_clock::now();
+  }
 
   CreateInterceptors();
   is_init_ = true;
@@ -175,7 +179,10 @@ void Carrier::Release() {
   }
 }
 
-Carrier::~Carrier() { VLOG(3) << "Carrier's destructor."; }
+Carrier::~Carrier() {
+  VLOG(3) << "Carrier's destructor.";
+  // test_thread_.join();
+}
 
 void Carrier::CopyParameters(
     int microbatch_id,
@@ -321,8 +328,6 @@ bool Carrier::Send(const InterceptorMessage& msg) {
     std::unique_lock<std::mutex> lock(running_mutex_);
     if (messages_for_test_.empty()) {
       cache_begin_ = std::chrono::steady_clock::now();
-      // std::time_t now_c =
-      // std::chrono::system_clock::to_time_t(cache_begin_));
       VLOG(3) << "messages_for_test_ empty, reset cache_begin_";
     }
 
