@@ -78,7 +78,7 @@ def _squared_l2_norm(x):
         return _legacy_C_ops.squared_l2_norm(x)
 
     op_type = 'squared_l2_norm'
-    check_variable_and_dtype(x, 'x', ['float32', 'float64'], op_type)
+    check_variable_and_dtype(x, 'x', ['float32', 'float64', 'uint16', 'float16'], op_type)
     helper = LayerHelper(op_type, **locals())
     out = helper.create_variable_for_type_inference(x.dtype)
 
@@ -583,7 +583,7 @@ class ClipGradByGlobalNorm(ClipGradBase):
                         merge_grad = layers.get_tensor_from_selected_rows(
                             merge_grad)
                     sum_square = _squared_l2_norm(merge_grad)
-                    if sum_square.dtype == core.VarDesc.VarType.FP16:
+                    if sum_square.dtype == core.VarDesc.VarType.FP16 or sum_square.dtype == core.VarDesc.VarType.BF16:
                         sum_square_list_fp16.append(sum_square)
                     elif sum_square.dtype == core.VarDesc.VarType.FP32:
                         sum_square_list_fp32.append(sum_square)
@@ -600,7 +600,11 @@ class ClipGradByGlobalNorm(ClipGradBase):
 
                 global_norm_var = []
                 if len(sum_square_list_fp16) > 0:
-                    global_norm_var_fp16 = layers.sums(sum_square_list_fp16)
+                    print('----------------------------------')
+                    for ele in sum_square_list_fp16:
+                        print(ele)
+                    global_norm_var_fp16 = paddle.add_n(sum_square_list_fp16)#layers.sums(sum_square_list_fp16)
+                    print('----------------------------------')
                     if sum_square_list_fp32 or sum_square_list or not _allow_pure_fp16_global_norm_clip(
                     ):
                         global_norm_var.append(
@@ -641,6 +645,9 @@ class ClipGradByGlobalNorm(ClipGradBase):
                 with p.block.program._optimized_guard([p, g]):
                     new_g = _cast_to_mp_type_if_enabled(g)
                     # inplace
+                    # assert False
+                    print("----------------------------------")
+                    print(f"new_g:{new_g}")
                     scale_input = (scale_var.astype('float16') if
                                    new_g.dtype == core.VarDesc.VarType.FP16 and
                                    scale_var.dtype != core.VarDesc.VarType.FP16
@@ -657,6 +664,8 @@ class ClipGradByGlobalNorm(ClipGradBase):
                                     },
                                     outputs={'Out': new_g})
                     if new_g is not g:
+                        print("new_g is not g")
+                        assert False
                         block.append_op(type='cast',
                                         inputs={'X': new_g},
                                         outputs={'Out': g},
@@ -664,10 +673,13 @@ class ClipGradByGlobalNorm(ClipGradBase):
                                             'in_dtype': new_g.dtype,
                                             'out_dtype': g.dtype
                                         })
-
+                print("-------------------no guard")
+                print(p.name, g.name)
+                
                 param_new_grad_name_dict[p.name] = g.name
                 params_and_grads.append((p, g))
 
+        #assert False
         _correct_clip_op_role_var(params_and_grads, param_new_grad_name_dict)
         return params_and_grads
 

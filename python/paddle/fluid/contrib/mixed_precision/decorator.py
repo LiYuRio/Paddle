@@ -228,6 +228,9 @@ class OptimizerWithMixedPrecision(object):
             block.append_op(type='assign',
                             inputs={'X': [name]},
                             outputs={'Out': [tmp]})
+
+            print(f"tmp={tmp}, name={name}")
+            print("---------------------end _add_cast_ops_to_startup_program")
             block.append_op(type='cast',
                             inputs={'X': [tmp]},
                             outputs={'Out': [name]},
@@ -362,7 +365,7 @@ class OptimizerWithMixedPrecision(object):
     def _split_grads(self, params_grads):
         grads = [g for _, g in params_grads]
         fp32_grads = [g for g in grads if g.dtype == core.VarDesc.VarType.FP32]
-        fp16_grads = [g for g in grads if g.dtype == core.VarDesc.VarType.FP16]
+        fp16_grads = [g for g in grads if g.dtype == core.VarDesc.VarType.FP16 or g.dtype == core.VarDesc.VarType.BF16]
         assert len(fp32_grads) + len(fp16_grads) == len(grads), \
             "Data types of all grads must be either fp16 or fp32."
         return grads, fp32_grads, fp16_grads
