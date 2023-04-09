@@ -5100,6 +5100,7 @@ class PipelineOptimizer(object):
                         numel = np.prod(var_shape)
                         use_mp = (self.mp_degree > 1) and (numel %
                                                            self.mp_degree == 0)
+                        enable_partial_send_recv = self.enable_partial_send_recv
 
                         if 'subprog' in var.name:
                             # For recompute, if the checkpoints var is layer_norm_6.tmp_2
@@ -5146,8 +5147,7 @@ class PipelineOptimizer(object):
                                                       Parameter) else False
                         block._insert_op_without_sync(
                             index=index + extra_index_info['index'],
-                            type='send_v2'
-                            if not use_mp or is_param else 'partial_send',
+                            type='send_v2' if not use_mp or is_param or not enable_partial_send_recv else 'partial_send',
                             inputs={'X': var},
                             attrs={
                                 self._op_device_key: prev_dev,
@@ -5183,8 +5183,7 @@ class PipelineOptimizer(object):
                             extra_index_info['index'] += 1
                         block._insert_op_without_sync(
                             index=index + extra_index_info['index'],
-                            type='recv_v2'
-                            if not use_mp or is_param else 'partial_recv',
+                            type='recv_v2' if not use_mp or is_param or not enable_partial_send_recv else 'partial_recv',
                             outputs={'Out': [var]},
                             attrs={
                                 'out_shape': var_shape,
@@ -5199,7 +5198,7 @@ class PipelineOptimizer(object):
                                 'id': self.mp_rank,
                             })
                         extra_index_info['index'] += 1
-                        if use_mp and not is_param:
+                        if use_mp and not is_param and enable_partial_send_recv:
                             block._insert_op_without_sync(
                                 index=index + extra_index_info['index'],
                                 type='partial_allgather',
@@ -6028,6 +6027,7 @@ class PipelineOptimizer(object):
                 'Please use pipeline with fleet to use {}.'.format(key)
         self.local_rank = pipeline_opt['local_rank']
         self.schedule_mode = pipeline_opt['schedule_mode']
+        self.enable_partial_send_recv = pipeline_opt['enable_partial_send_recv']
         self.micro_batch_size = pipeline_opt['micro_batch_size']
         self.use_sharding = pipeline_opt['use_sharding']
         self.ring_id = pipeline_opt['ring_id']
