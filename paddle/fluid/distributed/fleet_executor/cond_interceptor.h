@@ -36,10 +36,11 @@ class CondInterceptor final : public Interceptor {
   void PrepareDeps();
   void Run(const InterceptorMessage& msg);
   void Compute(int64_t gen_step);
-  bool GetCondResult();
+  bool GetCondResult(int64_t scope_id);
   void SendDataReady(int64_t down_id);
   void SendStartLoop(int64_t down_id, int64_t gen_step);
   void ReplyDataIsUseless(int64_t up_id);
+  void ComputeAfterGen();
 
   int64_t cur_scope_id_;
 
@@ -47,9 +48,14 @@ class CondInterceptor final : public Interceptor {
   std::set<int64_t> normal_out_id_;
   int64_t stop_loop_id_;
   int64_t loop_id_;
+  std::vector<int64_t> ready_scope_id_;
+  int64_t total_num_of_scopes_{0};
+  int64_t scope_counter_{0};
+  int64_t generation_step_{0};
+  bool start_to_record_{false};
+  std::vector<int64_t> finish_scope_id_;
+  int64_t num_of_generation_{0};
   std::map<int64_t, int64_t> scope_id_to_gen_step_;
-  int64_t start_micro_step_;
-  int64_t num_micro_step_;
 };
 
 }  // namespace distributed
