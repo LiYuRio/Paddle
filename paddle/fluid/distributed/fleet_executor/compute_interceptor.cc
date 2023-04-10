@@ -111,11 +111,8 @@ bool ComputeInterceptor::IsInputReady() {
     VLOG(3) << "Is Input Ready in gen step "
             << gen_step_to_scope_id_to_finish_flag_.begin()->first;
   }
-  int64_t num_micro_step =
-      (num_micro_step_ == -1 ? node_->max_run_times() : num_micro_step_);
   int64_t start_micro_step = (start_micro_step_ == -1 ? 0 : start_micro_step_);
-  for (int64_t i = start_micro_step; i < start_micro_step + num_micro_step;
-       ++i) {
+  for (int64_t i = start_micro_step; i < node_->max_run_times(); ++i) {
     bool flag = true;
     for (auto& ins : in_readys_) {
       auto ready_size_map = ins.second.second;
@@ -174,7 +171,6 @@ void ComputeInterceptor::SendDataReadyToDownStream() {
   bool need_send_vars = !(node_->vars_to_dtype().empty());
   InterceptorMessage ready_msg;
   ready_msg.set_start_micro_step(start_micro_step_);
-  ready_msg.set_num_micro_step(num_micro_step_);
   if (need_send_vars) {
     ready_msg = PrepareVarsMsg();
   } else {
@@ -353,7 +349,6 @@ void ComputeInterceptor::Compute(const InterceptorMessage& msg) {
             << " receive data_is_ready " << msg.src_id() << " "
             << msg.scope_idx() << " ";
     start_micro_step_ = msg.start_micro_step();
-    num_micro_step_ = msg.num_micro_step();
     IncreaseReady(msg.src_id(), msg.scope_idx());
     Run();
   } else if (msg.message_type() == DATA_IS_USELESS) {
@@ -374,7 +369,6 @@ void ComputeInterceptor::Compute(const InterceptorMessage& msg) {
             << " receive start_loop " << msg.src_id() << " in scope "
             << msg.scope_idx() << " with gen_step " << msg.gen_step();
     start_micro_step_ = msg.start_micro_step();
-    num_micro_step_ = msg.num_micro_step();
     IncreaseReady(msg.src_id(), msg.scope_idx());
     int64_t gen_step = msg.gen_step();
     gen_step_to_scope_id_to_finish_flag_[gen_step].emplace(msg.scope_idx(),

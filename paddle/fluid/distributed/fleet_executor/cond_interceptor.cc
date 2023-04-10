@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include "paddle/fluid/distributed/fleet_executor/cond_interceptor.h"
-#include <algorithm>
 #include "paddle/fluid/distributed/fleet_executor/task_node.h"
 #include "paddle/fluid/framework/executor_gc_helper.h"
 #include "paddle/fluid/framework/operator.h"
@@ -27,6 +26,7 @@ namespace distributed {
 
 CondInterceptor::CondInterceptor(int64_t interceptor_id, TaskNode* node)
     : Interceptor(interceptor_id, node) {
+  total_num_of_scopes_ = node->max_run_times();
   PrepareDeps();
   RegisterMsgHandle([this](const InterceptorMessage& msg) { Run(msg); });
 }
@@ -39,6 +39,7 @@ void CondInterceptor::PrepareDeps() {
   for (const auto& up : upstream) {
     if (id_to_dep_type.at(up.first) == DependType::NORMAL) {
       normal_in_id_.insert(up.first);
+      generation_step_ = up.second;
     } else if (id_to_dep_type.at(up.first) == DependType::LOOP) {
       loop_id_ = up.first;
     }
@@ -89,9 +90,8 @@ bool CondInterceptor::GetCondResult() {
 void CondInterceptor::SendDataReady(int64_t down_id) {
   InterceptorMessage ready_msg;
   ready_msg.set_message_type(DATA_IS_READY);
-  ready_msg.set_scope_idx(cur_scope_id_);
   ready_msg.set_start_micro_step(start_micro_step_);
-  ready_msg.set_num_micro_step(num_micro_step_);
+  ready_msg.set_scope_idx(cur_scope_id_);
   Send(down_id, ready_msg);
 }
 
@@ -99,9 +99,8 @@ void CondInterceptor::SendStartLoop(int64_t down_id, int64_t gen_step) {
   InterceptorMessage ready_msg;
   ready_msg.set_message_type(START_LOOP);
   ready_msg.set_scope_idx(cur_scope_id_);
-  ready_msg.set_gen_step(gen_step);
   ready_msg.set_start_micro_step(start_micro_step_);
-  ready_msg.set_num_micro_step(num_micro_step_);
+  ready_msg.set_gen_step(gen_step);
   Send(down_id, ready_msg);
 }
 
@@ -113,94 +112,136 @@ void CondInterceptor::ReplyDataIsUseless(int64_t up_id) {
 }
 
 void CondInterceptor::Compute(int64_t gen_step) {
-  bool cond = GetCondResult();
-  VLOG(3) << "Cond interceptor get condition var " << node_->cond_var()
-          << " with value " << cond;
-  if (cond) {
-    VLOG(3) << "Loop again in scope " << cur_scope_id_ << " gen_step "
-            << gen_step;
-    for (auto& down_id : normal_out_id_) {
-      SendStartLoop(down_id, gen_step);
-    }
-  } else {
-    PADDLE_ENFORCE_NE(scope_id_to_gen_step_.find(cur_scope_id_),
-                      scope_id_to_gen_step_.end(),
-                      platform::errors::InvalidArgument(
-                          "Can not find scope id %ld in scope_id_to_gen_step",
-                          cur_scope_id_));
-    VLOG(3) << "Finish loop in scope " << cur_scope_id_ << " with "
-            << scope_id_to_gen_step_.at(cur_scope_id_) << " generation steps.";
-    scope_id_to_gen_step_.erase(cur_scope_id_);
-    SendDataReady(stop_loop_id_);
+  VLOG(3) << "Loop again in scope " << cur_scope_id_ << " gen_step "
+          << gen_step;
+  for (auto& down_id : normal_out_id_) {
+    SendStartLoop(down_id, gen_step);
+  }
+}
+
+void CondInterceptor::ComputeAfterGen() {
+  PADDLE_ENFORCE_NE(
+      scope_id_to_gen_step_.find(cur_scope_id_),
+      scope_id_to_gen_step_.end(),
+      platform::errors::InvalidArgument(
+          "Can not find scope id %ld in scope_id_to_gen_step", cur_scope_id_));
+  VLOG(3) << "Finish loop in scope " << cur_scope_id_ << " with "
+          << scope_id_to_gen_step_.at(cur_scope_id_) << " generation steps.";
+  scope_id_to_gen_step_.erase(cur_scope_id_);
+  SendDataReady(stop_loop_id_);
+  for (auto& up_id : normal_in_id_) {
+    ReplyDataIsUseless(up_id);
+  }
+  // Gc the variable in while block
+  if (gc_) {
+    VLOG(3) << "Release vars in while block in scope " << cur_scope_id_;
+    framework::DeleteUnusedTensors(*microbatch_scopes_[cur_scope_id_],
+                                   node_->while_block_vars(),
+                                   gc_.get());
   }
 }
 
 void CondInterceptor::Run(const InterceptorMessage& msg) {
   if (msg.message_type() == DATA_IS_READY) {
+    VLOG(3) << "Receving data ready message from " << msg.src_id() << " scope "
+            << msg.scope_idx();
+    scope_counter_++;
     cur_scope_id_ = msg.scope_idx();
-    start_micro_step_ = msg.start_micro_step();
-    num_micro_step_ = msg.num_micro_step();
-    scope_id_to_gen_step_.emplace(cur_scope_id_, 0);
-    Compute(/*gen_step=*/0);
-  } else if (msg.message_type() == DATA_IS_USELESS) {
-    if (node_->id_to_dep_type().at(msg.src_id()) == DependType::STOP_LOOP) {
-      for (auto& up_id : normal_in_id_) {
-        ReplyDataIsUseless(up_id);
+    bool cond = GetCondResult();
+    if (cond) {
+      ++num_of_generation_;
+      ready_scope_id_.emplace_back(msg.scope_idx());
+    } else {
+      ComputeAfterGen();
+    }
+    if (num_of_generation_ == generation_step_ ||
+        scope_counter_ == total_num_of_scopes_) {
+      std::sort(ready_scope_id_.begin(), ready_scope_id_.end());
+      start_micro_step_ = *ready_scope_id_.begin();
+      for (auto& scope_id : ready_scope_id_) {
+        cur_scope_id_ = scope_id;
+        if (scope_id_to_gen_step_.find(scope_id) !=
+            scope_id_to_gen_step_.end()) {
+          scope_id_to_gen_step_.at(scope_id) =
+              scope_id_to_gen_step_.at(scope_id) + 1;
+        } else {
+          scope_id_to_gen_step_.emplace(scope_id, 0);
+        }
+        Compute(scope_id_to_gen_step_.at(scope_id));
       }
-      // Gc the variable in while block
-      int64_t scope_id = msg.scope_idx();
-      if (gc_) {
-        VLOG(3) << "Release vars in while block in scope " << scope_id;
-        framework::DeleteUnusedTensors(*microbatch_scopes_[scope_id],
-                                       node_->while_block_vars(),
-                                       gc_.get());
-      }
+      ready_scope_id_.clear();
+      finish_scope_id_.clear();
+      start_to_record_ = false;
     }
   } else if (msg.message_type() == DATA_WITH_VARS) {
-    int64_t scope_id = msg.scope_idx();
-    PADDLE_ENFORCE_NE(
-        scope_id_to_gen_step_.find(scope_id),
-        scope_id_to_gen_step_.end(),
-        platform::errors::InvalidArgument(
-            "Can not find scope id %ld in scope_id_to_gen_step", scope_id));
-    // Keep the message in order with scope_id
-    // message with scope 3 never send before scope 1.
-    int64_t gen_step = scope_id_to_gen_step_.at(scope_id) + 1;
-    bool wait_prev_scope = false;
-    // If the previous scope gen_step less than cur scope
-    // means: the previous scope doesn't finish last step generation, should
-    // wait.
-    auto iter = scope_id_to_gen_step_.begin();
-    while (iter != scope_id_to_gen_step_.end()) {
-      if (iter->first == scope_id) {
-        break;
-      }
-      if (iter->second < gen_step) {
-        wait_prev_scope = true;
-        break;
-      }
-      ++iter;
+    VLOG(3) << "Receving loop again message from " << msg.src_id()
+            << " in scope " << msg.scope_idx();
+    cur_scope_id_ = msg.scope_idx();
+    bool cond = GetCondResult();
+    if (!cond) {
+      VLOG(3) << "Finish loop in scope " << cur_scope_id_;
+      start_to_record_ = true;
     }
-    scope_id_to_gen_step_.at(scope_id) = gen_step;
-    if (!wait_prev_scope) {
-      // Start send message to all scopes gen_step equal to cur_scope
-      std::vector<int64_t> ready_scope_ids;
+    if (start_to_record_) {
+      if (cond) {
+        ready_scope_id_.emplace_back(msg.scope_idx());
+      } else {
+        finish_scope_id_.emplace_back(msg.scope_idx());
+      }
+      if (static_cast<int>(ready_scope_id_.size() + finish_scope_id_.size()) ==
+          num_of_generation_) {
+        for (auto& scope_id : finish_scope_id_) {
+          --num_of_generation_;
+          cur_scope_id_ = scope_id;
+          ComputeAfterGen();
+        }
+      }
+    } else {
+      int64_t scope_id = msg.scope_idx();
+      PADDLE_ENFORCE_NE(
+          scope_id_to_gen_step_.find(scope_id),
+          scope_id_to_gen_step_.end(),
+          platform::errors::InvalidArgument(
+              "Can not find scope id %ld in scope_id_to_gen_step", scope_id));
+      // Keep the message in order with scope_id
+      // message with scope 3 never send before scope 1.
+      int64_t gen_step = scope_id_to_gen_step_.at(scope_id) + 1;
+      bool wait_prev_scope = false;
+      // If the previous scope gen_step less than cur scope
+      // means: the previous scope doesn't finish last step generation, should
+      // wait.
+      auto iter = scope_id_to_gen_step_.begin();
       while (iter != scope_id_to_gen_step_.end()) {
-        if (iter->second == gen_step) {
-          ready_scope_ids.emplace_back(iter->first);
-        } else if (iter->second > gen_step) {
-          PADDLE_THROW(
-              platform::errors::Fatal("Some error may occur. Scope %ld's "
-                                      "gen_step is much larger than previous.",
-                                      iter->first));
-        } else {
+        if (iter->first == scope_id) {
+          break;
+        }
+        if (iter->second < gen_step) {
+          wait_prev_scope = true;
           break;
         }
         ++iter;
       }
-      for (auto& scope_id : ready_scope_ids) {
-        cur_scope_id_ = scope_id;
-        Compute(gen_step);
+      scope_id_to_gen_step_.at(scope_id) = gen_step;
+      if (!wait_prev_scope) {
+        // Start send message to all scopes gen_step equal to cur_scope
+        std::vector<int64_t> ready_scope_ids;
+        while (iter != scope_id_to_gen_step_.end()) {
+          if (iter->second == gen_step) {
+            ready_scope_ids.emplace_back(iter->first);
+          } else if (iter->second > gen_step) {
+            PADDLE_THROW(platform::errors::Fatal(
+                "Some error may occur. Scope %ld's "
+                "gen_step is much larger than previous.",
+                iter->first));
+          } else {
+            break;
+          }
+          ++iter;
+        }
+        for (auto& scope_id : ready_scope_ids) {
+          cur_scope_id_ = scope_id;
+          Compute(gen_step);
+        }
       }
     }
   }

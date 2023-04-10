@@ -28,14 +28,10 @@ class StartInterceptor final : public ComputeInterceptor {
 
  private:
   void SendDataReadyToDownStream() override;
-  void RunOps() override;
   void Compute(const InterceptorMessage& msg) override;
 
-  int64_t batch_size_{0};
-  int64_t finish_count_{0};
   int64_t step_{0};
-  std::chrono::time_point<std::chrono::system_clock> start_time_{
-      std::chrono::system_clock::now()};
+  int64_t start_step_{0};
 };
 
 }  // namespace distributed
