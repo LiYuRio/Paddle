@@ -104,44 +104,25 @@ void ComputeInterceptor::DecreaseBuff(int64_t down_id) {
 }
 
 bool ComputeInterceptor::IsInputReady() {
-  std::map<int64_t, bool> scope_id_to_finish_flag;
-  if (!gen_step_to_scope_id_to_finish_flag_.empty()) {
-    scope_id_to_finish_flag =
-        gen_step_to_scope_id_to_finish_flag_.begin()->second;
-    VLOG(3) << "Is Input Ready in gen step "
-            << gen_step_to_scope_id_to_finish_flag_.begin()->first;
-  }
-  int64_t start_micro_step = (start_micro_step_ == -1 ? 0 : start_micro_step_);
-  for (int64_t i = start_micro_step; i < node_->max_run_times(); ++i) {
+  for (int64_t i = 0; i < node_->max_run_times(); ++i) {
     bool flag = true;
     for (auto& ins : in_readys_) {
       auto ready_size_map = ins.second.second;
       flag = flag && (ready_size_map.at(i) != 0);
     }
     if (flag) {
-      if (scope_id_to_finish_flag.empty()) {
-        cur_scope_id_ = i;
-        return true;
-      } else if (scope_id_to_finish_flag.find(i) !=
-                 scope_id_to_finish_flag.end()) {
-        for (auto iter : scope_id_to_finish_flag) {
-          if (iter.first == i) {
-            break;
-          } else if (!iter.second) {
-            VLOG(3) << "The previous scope is not ready, waiting for the "
-                       "previous scope "
-                    << iter.first << " in gen_step "
-                    << gen_step_to_scope_id_to_finish_flag_.begin()->first;
-            return false;
-          }
+      for (auto iter : scope_id_to_finish_flag_) {
+        if (iter.first == i) {
+          break;
+        } else if (!iter.second) {
+          VLOG(3) << "The previous scope is not ready, waiting for the "
+                     "previous scope "
+                  << iter.first;
+          return false;
         }
-        cur_scope_id_ = i;
-        return true;
-      } else {
-        VLOG(3) << "Interceptor " << GetInterceptorId() << " in scope " << i
-                << " is larger than gen_step "
-                << gen_step_to_scope_id_to_finish_flag_.begin()->first;
       }
+      cur_scope_id_ = i;
+      return true;
     } else {
       VLOG(3) << "Interceptor " << GetInterceptorId() << " in scope " << i
               << "'s upstreams aren't all ready.";
@@ -294,21 +275,13 @@ void ComputeInterceptor::Run() {
 
     RunOps();
 
-    if (!gen_step_to_scope_id_to_finish_flag_.empty()) {
-      auto iter = gen_step_to_scope_id_to_finish_flag_.begin();
-      VLOG(3) << "id=" << GetInterceptorId()
-              << " ComputeInterceptor running in scope " << cur_scope_id_
-              << " with gen_step " << iter->first;
-      auto& scope_id_to_finish_flag = iter->second;
+    if (!scope_id_to_finish_flag_.empty()) {
       PADDLE_ENFORCE_NE(
-          scope_id_to_finish_flag.find(cur_scope_id_),
-          scope_id_to_finish_flag.end(),
+          scope_id_to_finish_flag_.find(cur_scope_id_),
+          scope_id_to_finish_flag_.end(),
           platform::errors::NotFound(
               "Can not find scope %ld in scope_id_to_finish", cur_scope_id_));
-      scope_id_to_finish_flag.erase(cur_scope_id_);
-      if (scope_id_to_finish_flag.empty()) {
-        gen_step_to_scope_id_to_finish_flag_.erase(iter);
-      }
+      scope_id_to_finish_flag_.erase(cur_scope_id_);
     }
 
     // send to downstream and increase buff used
@@ -370,9 +343,7 @@ void ComputeInterceptor::Compute(const InterceptorMessage& msg) {
             << msg.scope_idx() << " with gen_step " << msg.gen_step();
     start_micro_step_ = msg.start_micro_step();
     IncreaseReady(msg.src_id(), msg.scope_idx());
-    int64_t gen_step = msg.gen_step();
-    gen_step_to_scope_id_to_finish_flag_[gen_step].emplace(msg.scope_idx(),
-                                                           false);
+    scope_id_to_finish_flag_.emplace(msg.scope_idx(), false);
     Run();
   }
 }
