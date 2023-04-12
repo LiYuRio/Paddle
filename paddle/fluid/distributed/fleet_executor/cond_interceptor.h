@@ -56,6 +56,7 @@ class CondInterceptor final : public Interceptor {
   std::vector<int64_t> finish_scope_id_;
   int64_t num_of_generation_{0};
   std::map<int64_t, int64_t> scope_id_to_gen_step_;
+  std::map<int64_t, int64_t> scope_id_to_compute_gen_step_;
 };
 
 }  // namespace distributed

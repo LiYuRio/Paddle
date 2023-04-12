@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "paddle/fluid/distributed/fleet_executor/cond_interceptor.h"
+#include <algorithm>
 #include <ostream>
 #include "paddle/fluid/distributed/fleet_executor/task_node.h"
 #include "paddle/fluid/framework/executor_gc_helper.h"
@@ -122,6 +123,7 @@ void CondInterceptor::ComputeAfterGen() {
           << scope_id_to_gen_step_.at(cur_scope_id_) << " generation steps.";
   // Clear the finish scope from map
   scope_id_to_gen_step_.erase(cur_scope_id_);
+  scope_id_to_compute_gen_step_.erase(cur_scope_id_);
   SendDataReady(stop_loop_id_);
   for (auto& up_id : normal_in_id_) {
     ReplyDataIsUseless(up_id);
@@ -162,7 +164,8 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
         } else {
           scope_id_to_gen_step_.emplace(scope_id, 0);
         }
-        Compute(scope_id_to_gen_step_.at(scope_id));
+        scope_id_to_compute_gen_step_[scope_id] = 0;
+        Compute(0);
       }
       ready_scope_id_.clear();
       finish_scope_id_.clear();
@@ -173,12 +176,16 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
     VLOG(3) << "Receving loop again message from " << msg.src_id()
             << " in scope " << scope_id;
     bool cond = GetCondResult(scope_id);
+    bool early_stop = scope_id % 4 == 2 && scope_id_to_gen_step_[scope_id] == 5;
     if (!cond) {
       VLOG(3) << "Start to record finish scope";
       start_to_record_ = true;
+    } else if (early_stop) {
+      VLOG(3) << "Start to test early_stop";
+      start_to_record_ = true;
     }
     if (start_to_record_) {
-      if (cond) {
+      if (cond && !early_stop) {
         ready_scope_id_.emplace_back(scope_id);
       } else {
         finish_scope_id_.emplace_back(scope_id);
@@ -186,29 +193,40 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
       bool finish_capture =
           static_cast<int>(ready_scope_id_.size() + finish_scope_id_.size()) ==
           num_of_generation_;
-      if (finish_capture) {
+      if (finish_capture || scope_counter_ % total_num_of_scopes_ == 0) {
         for (auto& scope_id : finish_scope_id_) {
           cur_scope_id_ = scope_id;
           ComputeAfterGen();
           --num_of_generation_;
         }
+        if (scope_counter_ % total_num_of_scopes_ == 0) {
+          std::sort(ready_scope_id_.begin(), ready_scope_id_.end());
+          for (auto& scope_id : ready_scope_id_) {
+            cur_scope_id_ = scope_id;
+            Compute(scope_id_to_compute_gen_step_.at(scope_id));
+          }
+          ready_scope_id_.clear();
+          finish_scope_id_.clear();
+          start_to_record_ = false;
+        }
       }
     } else {
       int64_t scope_id = msg.scope_idx();
       PADDLE_ENFORCE_NE(
-          scope_id_to_gen_step_.find(scope_id),
-          scope_id_to_gen_step_.end(),
+          scope_id_to_compute_gen_step_.find(scope_id),
+          scope_id_to_compute_gen_step_.end(),
           platform::errors::InvalidArgument(
-              "Can not find scope id %ld in scope_id_to_gen_step", scope_id));
+              "Can not find scope id %ld in scope_id_to_tmp_gen_step",
+              scope_id));
       // Keep the message in order with scope_id
       // message with scope 3 never send before scope 1.
-      int64_t gen_step = scope_id_to_gen_step_.at(scope_id) + 1;
+      int64_t gen_step = scope_id_to_compute_gen_step_.at(scope_id) + 1;
       bool wait_prev_scope = false;
       // If the previous scope gen_step less than cur scope
       // means: the previous scope doesn't finish last step generation, should
       // wait.
-      auto iter = scope_id_to_gen_step_.begin();
-      while (iter != scope_id_to_gen_step_.end()) {
+      auto iter = scope_id_to_compute_gen_step_.begin();
+      while (iter != scope_id_to_compute_gen_step_.end()) {
         if (iter->first == scope_id) {
           break;
         }
@@ -218,11 +236,13 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
         }
         ++iter;
       }
-      scope_id_to_gen_step_.at(scope_id) = gen_step;
+      scope_id_to_compute_gen_step_.at(scope_id) = gen_step;
+      scope_id_to_gen_step_.at(scope_id) =
+          scope_id_to_gen_step_.at(scope_id) + 1;
       if (!wait_prev_scope) {
         // Start send message to all scopes gen_step equal to cur_scope
         std::vector<int64_t> ready_scope_ids;
-        while (iter != scope_id_to_gen_step_.end()) {
+        while (iter != scope_id_to_compute_gen_step_.end()) {
           if (iter->second == gen_step) {
             ready_scope_ids.emplace_back(iter->first);
           } else if (iter->second > gen_step) {
