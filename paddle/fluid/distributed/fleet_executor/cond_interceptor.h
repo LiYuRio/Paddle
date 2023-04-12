@@ -35,10 +35,10 @@ class CondInterceptor final : public Interceptor {
  private:
   void PrepareDeps();
   void Run(const InterceptorMessage& msg);
-  void Compute(int64_t gen_step);
+  void Compute();
   bool GetCondResult(int64_t scope_id);
   void SendDataReady(int64_t down_id);
-  void SendStartLoop(int64_t down_id, int64_t gen_step);
+  void SendStartLoop(int64_t down_id);
   void ReplyDataIsUseless(int64_t up_id);
   void ComputeAfterGen();
 
@@ -55,6 +55,8 @@ class CondInterceptor final : public Interceptor {
   bool start_to_record_{false};
   std::vector<int64_t> finish_scope_id_;
   int64_t num_of_generation_{0};
+  int64_t counter_{0};
+  std::vector<int64_t> still_running_scope_id_;
   std::map<int64_t, int64_t> scope_id_to_gen_step_;
 };
 

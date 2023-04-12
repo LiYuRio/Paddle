@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include "paddle/fluid/distributed/fleet_executor/cond_interceptor.h"
-#include <ostream>
 #include "paddle/fluid/distributed/fleet_executor/task_node.h"
 #include "paddle/fluid/framework/executor_gc_helper.h"
 #include "paddle/fluid/framework/operator.h"
@@ -94,11 +93,10 @@ void CondInterceptor::SendDataReady(int64_t down_id) {
   Send(down_id, ready_msg);
 }
 
-void CondInterceptor::SendStartLoop(int64_t down_id, int64_t gen_step) {
+void CondInterceptor::SendStartLoop(int64_t down_id) {
   InterceptorMessage ready_msg;
   ready_msg.set_message_type(START_LOOP);
   ready_msg.set_scope_idx(cur_scope_id_);
-  ready_msg.set_gen_step(gen_step);
   Send(down_id, ready_msg);
 }
 
@@ -109,11 +107,10 @@ void CondInterceptor::ReplyDataIsUseless(int64_t up_id) {
   Send(up_id, ready_msg);
 }
 
-void CondInterceptor::Compute(int64_t gen_step) {
-  VLOG(3) << "Loop again in scope " << cur_scope_id_ << " with gen_step "
-          << gen_step;
+void CondInterceptor::Compute() {
+  VLOG(3) << "Loop again in scope " << cur_scope_id_;
   for (auto& down_id : normal_out_id_) {
-    SendStartLoop(down_id, gen_step);
+    SendStartLoop(down_id);
   }
 }
 
@@ -162,84 +159,49 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
         } else {
           scope_id_to_gen_step_.emplace(scope_id, 0);
         }
-        Compute(scope_id_to_gen_step_.at(scope_id));
+        Compute();
       }
       ready_scope_id_.clear();
       finish_scope_id_.clear();
-      start_to_record_ = false;
     }
   } else if (msg.message_type() == DATA_WITH_VARS) {
     int64_t scope_id = msg.scope_idx();
     VLOG(3) << "Receving loop again message from " << msg.src_id()
             << " in scope " << scope_id;
-    bool cond = GetCondResult(scope_id);
-    if (!cond) {
-      VLOG(3) << "Start to record finish scope";
-      start_to_record_ = true;
-    }
-    if (start_to_record_) {
-      if (cond) {
-        ready_scope_id_.emplace_back(scope_id);
-      } else {
-        finish_scope_id_.emplace_back(scope_id);
+    ++counter_;
+    still_running_scope_id_.emplace_back(scope_id);
+    if (counter_ == num_of_generation_) {
+      std::sort(still_running_scope_id_.begin(), still_running_scope_id_.end());
+      for (auto& scope_id : still_running_scope_id_) {
+        bool cond = GetCondResult(scope_id);
+        // bool not_early_stop = !(scope_id % 4 == 2 &&
+        // scope_id_to_gen_step_[scope_id] == 5);
+        if (cond) {
+          ready_scope_id_.emplace_back(scope_id);
+        } else {
+          VLOG(3) << "Start test early stop generation.";
+          finish_scope_id_.emplace_back(scope_id);
+        }
       }
-      bool finish_capture =
-          static_cast<int>(ready_scope_id_.size() + finish_scope_id_.size()) ==
-          num_of_generation_;
-      if (finish_capture) {
-        for (auto& scope_id : finish_scope_id_) {
+      still_running_scope_id_.clear();
+      counter_ = 0;
+
+      for (auto& scope_id : finish_scope_id_) {
+        cur_scope_id_ = scope_id;
+        ComputeAfterGen();
+        --num_of_generation_;
+      }
+
+      if (finish_scope_id_.empty() ||
+          scope_counter_ % total_num_of_scopes_ == 0) {
+        for (auto& scope_id : ready_scope_id_) {
           cur_scope_id_ = scope_id;
-          ComputeAfterGen();
-          --num_of_generation_;
+          scope_id_to_gen_step_.at(scope_id) =
+              scope_id_to_gen_step_.at(scope_id) + 1;
+          Compute();
         }
-      }
-    } else {
-      int64_t scope_id = msg.scope_idx();
-      PADDLE_ENFORCE_NE(
-          scope_id_to_gen_step_.find(scope_id),
-          scope_id_to_gen_step_.end(),
-          platform::errors::InvalidArgument(
-              "Can not find scope id %ld in scope_id_to_gen_step", scope_id));
-      // Keep the message in order with scope_id
-      // message with scope 3 never send before scope 1.
-      int64_t gen_step = scope_id_to_gen_step_.at(scope_id) + 1;
-      bool wait_prev_scope = false;
-      // If the previous scope gen_step less than cur scope
-      // means: the previous scope doesn't finish last step generation, should
-      // wait.
-      auto iter = scope_id_to_gen_step_.begin();
-      while (iter != scope_id_to_gen_step_.end()) {
-        if (iter->first == scope_id) {
-          break;
-        }
-        if (iter->second < gen_step) {
-          wait_prev_scope = true;
-          break;
-        }
-        ++iter;
-      }
-      scope_id_to_gen_step_.at(scope_id) = gen_step;
-      if (!wait_prev_scope) {
-        // Start send message to all scopes gen_step equal to cur_scope
-        std::vector<int64_t> ready_scope_ids;
-        while (iter != scope_id_to_gen_step_.end()) {
-          if (iter->second == gen_step) {
-            ready_scope_ids.emplace_back(iter->first);
-          } else if (iter->second > gen_step) {
-            PADDLE_THROW(platform::errors::Fatal(
-                "Some error may occur. Scope %ld's "
-                "gen_step is much larger than previous with %ld.",
-                iter->first,
-                iter->second));
-          } else {
-            break;
-          }
-          ++iter;
-        }
-        for (auto& scope_id : ready_scope_ids) {
-          cur_scope_id_ = scope_id;
-          Compute(gen_step);
-        }
+        ready_scope_id_.clear();
+        finish_scope_id_.clear();
       }
     }
   }

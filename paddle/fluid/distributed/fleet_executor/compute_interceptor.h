@@ -55,6 +55,7 @@ class ComputeInterceptor : public Interceptor {
   std::map<int64_t, std::map<int64_t, bool>>
       gen_step_to_scope_id_to_finish_flag_;
   std::set<int64_t> ready_scope_id_;
+  std::map<int64_t, bool> scope_id_to_finish_flag_;
 };
 
 }  // namespace distributed
