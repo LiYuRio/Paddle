@@ -176,16 +176,14 @@ void CondInterceptor::Run(const InterceptorMessage& msg) {
     VLOG(3) << "Receving loop again message from " << msg.src_id()
             << " in scope " << scope_id;
     bool cond = GetCondResult(scope_id);
-    bool early_stop = scope_id % 4 == 2 && scope_id_to_gen_step_[scope_id] == 5;
+    // bool early_stop = scope_id % 4 == 2 && scope_id_to_gen_step_[scope_id] ==
+    // 5;
     if (!cond) {
       VLOG(3) << "Start to record finish scope";
       start_to_record_ = true;
-    } else if (early_stop) {
-      VLOG(3) << "Start to test early_stop";
-      start_to_record_ = true;
     }
     if (start_to_record_) {
-      if (cond && !early_stop) {
+      if (cond) {
         ready_scope_id_.emplace_back(scope_id);
       } else {
         finish_scope_id_.emplace_back(scope_id);
