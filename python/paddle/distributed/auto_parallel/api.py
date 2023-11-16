@@ -142,9 +142,12 @@ def shard_tensor(
 
     # 1. create dense tensor
     # `paddle.to_tensor` supports both dynamic and static mode
-    tensor = paddle.to_tensor(
-        data, dtype=dtype, place=place, stop_gradient=stop_gradient
-    )
+    if paddle.nn.initializer.lazy_init.lazy_init_helper().state:
+        tensor = data
+    else:
+        tensor = paddle.to_tensor(
+            data, dtype=dtype, place=place, stop_gradient=stop_gradient
+        )
 
     # 2. create dist tensor
     assert len(dist_attr.dims_mapping) == len(

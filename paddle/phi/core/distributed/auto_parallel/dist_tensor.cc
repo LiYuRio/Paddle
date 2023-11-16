@@ -50,7 +50,12 @@ DistTensor::DistTensor(const std::shared_ptr<phi::DenseTensor>& global_value,
 
       // 2. reshard from replicated to other state
       auto* func = ChooseProperReshardFunction(replicated_tensor, dist_attr);
-      auto* dev_ctx = DeviceContextPool::Instance().Get(global_value->place());
+      DeviceContext* dev_ctx;
+      if (global_value->initialized()) {
+        dev_ctx = DeviceContextPool::Instance().Get(global_value->place());
+      } else {
+        dev_ctx = DeviceContextPool::Instance().Get(GetDefaultPlace());
+      }
       func->Eval(dev_ctx, replicated_tensor, dist_attr, this);
     } else {
       value_ = global_value;
@@ -90,7 +95,12 @@ DistTensor::DistTensor(const std::shared_ptr<phi::DenseTensor>& global_value,
 
       // 2. reshard from replicated to other state
       auto* func = ChooseProperReshardFunction(replicated_tensor, dist_attr);
-      auto* dev_ctx = DeviceContextPool::Instance().Get(global_value->place());
+      DeviceContext* dev_ctx;
+      if (global_value->initialized()) {
+        dev_ctx = DeviceContextPool::Instance().Get(global_value->place());
+      } else {
+        dev_ctx = DeviceContextPool::Instance().Get(GetDefaultPlace());
+      }
       func->Eval(dev_ctx, replicated_tensor, dist_attr, this);
     } else {
       value_ = global_value;
