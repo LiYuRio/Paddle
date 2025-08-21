@@ -435,6 +435,38 @@ PyObject* pylayer_method_apply(PyObject* cls,
             egr::EagerUtils::autograd_meta(&tensors));
         ctx->forward_output_tensor_is_duplicable.push_back(true);
       }
+    } else if (PyDict_Check(obj)) {
+      // auto output_dict = ::pybind11::handle(obj)
+      //           .cast<std::unordered_map<std::wstring, paddle::Tensor*>>();
+      PyObject* value_list = PyDict_Values(obj);
+
+      std::vector<paddle::Tensor*> tensors;
+      Py_ssize_t len = PyList_Size(value_list);
+      for (Py_ssize_t j = 0; j < len; j++) {
+        PyObject* o = PyList_GetItem(value_list, j);
+        if (PyCheckTensor(o)) {
+          tensors.push_back(&(reinterpret_cast<TensorObject*>(o)->tensor));
+          if (input_tensorbases.count(
+                  reinterpret_cast<TensorObject*>(o)->tensor.impl().get())) {
+            if (not_inplace_tensorbases.count(
+                    reinterpret_cast<TensorObject*>(o)->tensor.impl().get())) {
+              PyTuple_SetItem(obj,
+                              j,
+                              new_tensor_with_impl(&(
+                                  reinterpret_cast<TensorObject*>(o)->tensor)));
+            } else {
+              inplace_tensors.insert(
+                  &(reinterpret_cast<TensorObject*>(o)->tensor));
+            }
+          }
+        }
+      }
+      if (!tensors.empty()) {
+        outputs_tensor.push_back(tensors);
+        outputs_autograd_meta.push_back(
+            egr::EagerUtils::autograd_meta(&tensors));
+        ctx->forward_output_tensor_is_duplicable.push_back(true);
+      }
     }
   }
 
